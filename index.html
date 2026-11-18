@@ -255,7 +255,7 @@ function handleErr(e){
 function api(fn, ...args){
   return new Promise((res,rej)=>{
     if(!IS_GAS){
-      fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({fn,args:[S.pin,...args]}),redirect:"follow"})
+      fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({fn,args:[S.pin,...args],op:OP_ID+":"+fn}),redirect:"follow"})
         .then(r=>{ if(!r.ok) throw new Error("Máy chủ lỗi "+r.status+". Thử lại."); return r.json(); })
         .then(j=>{ if(j&&j.ok) res(j.data===null?undefined:j.data); else rej(new Error((j&&j.error)||"Lỗi không rõ.")); })
         .catch(e=>rej(/Failed to fetch|NetworkError|Load failed/i.test(String(e&&e.message))? new Error("Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.") : e));
@@ -264,9 +264,16 @@ function api(fn, ...args){
     google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](S.pin, ...args);
   });
 }
+/* Chống bấm 2 lần: đang lưu thì bỏ qua lần bấm sau; máy chủ cũng tự bỏ lệnh trùng (cùng mã thao tác) */
+let saving=false;
 async function save(fn, okMsg){
-  try{ const r=await fn(); if(okMsg) toast(okMsg,"ok"); load(); return r===undefined?true:r; }catch(e){ handleErr(e); return false; }
+  if(saving){ toast("Đang lưu, đợi chút…"); return false; }
+  saving=true;
+  try{ const r=await fn(); OP_ID=newOp(); if(okMsg) toast(okMsg,"ok"); load(); return r===undefined?true:r; }catch(e){ handleErr(e); return false; }
+  finally{ saving=false; }
 }
+let OP_ID=newOp();
+function newOp(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,10); }
 
 /* ---------- derived ---------- */
 function allTickets(){ const m=new Map(S.tRecent); for(const [k,v] of S.tOpen) m.set(k,v); return m; }
@@ -619,6 +626,7 @@ function drawQRs(){ if(!window.QRCode) return; document.querySelectorAll(".qrc")
 
 /* ---------- modal ---------- */
 function modal(title, body, foot){
+  OP_ID=newOp();
   $("#modalRoot").innerHTML='<div class="veil" id="veil"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mTitle"><div class="sheet-h"><h3 id="mTitle">'+esc(title)+'</h3><button class="x" type="button" data-a="close" aria-label="Đóng">×</button></div><div class="sheet-b" id="mBody">'+body+'</div>'+(foot?'<div class="sheet-f">'+foot+'</div>':'')+'</div></div>';
   const f=$("#mBody").querySelector("input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea"); if(f && !("ontouchstart" in window)) f.focus();
 }
@@ -646,7 +654,10 @@ function num(id){ const n=Number(val(id)); return isFinite(n)?n:NaN; }
 const A = {};
 document.addEventListener("click", e=>{
   const b=e.target.closest("[data-a]"); if(!b) return;
-  const fn=A[b.dataset.a]; if(fn){ e.preventDefault(); fn(b.dataset, b); }
+  const fn=A[b.dataset.a]; if(!fn) return; e.preventDefault();
+  if(b.tagName==="BUTTON" && b.disabled) return;
+  const r=fn(b.dataset, b);
+  if(r && typeof r.then==="function" && b.tagName==="BUTTON" && !b.disabled){ b.disabled=true; r.finally(()=>{ b.disabled=false; }); }
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id==="pinIn"){ e.preventDefault(); A.doLogin({}, $("[data-a=doLogin]")); } });
 document.addEventListener("input", e=>{ if(e.target.id==="partQ"){ S.ui.partQ=e.target.value; rerender(); } });
