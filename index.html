@@ -215,6 +215,9 @@ const S = {pin:"", role:"", isEditor:false, isTruong:false, pending:[], readOnly
   got:{}, timedOut:false, err:null,
   ui:{kartFilter:"all", partQ:"", stockLoc:"xuong", dc:null, ticketTab:"open", histFrom:null, histTo:null, hist:null, kartTicketsCache:{}}};
 let curDay="", openedHash=null, pollT=null;
+/* Mã ngày của checklist: dạng N20261118 để Google Sheet không tự đổi thành ô ngày tháng
+   (ô ngày tháng đọc lại không khớp nên checklist đã làm không hiện dấu tích) */
+const chkKey = d => "N"+String(d).replace(/-/g,"");
 
 /* ---------- utils ---------- */
 const $ = s => document.querySelector(s);
@@ -335,7 +338,7 @@ async function load(){
   if(!S.pin||S.loading) return; S.loading=true;
   const d=dayKey(); if(d!==curDay) curDay=d;
   try{
-    const r=await api("getAll", curDay);
+    const r=await api("getAll", chkKey(curDay));
     S.role=r.role; S.isEditor=r.role==="admin"; S.isTruong=r.role==="admin"||r.role==="truong"; S.pending=r.pending||[]; S.config=r.config||{};
     S.karts=new Map(r.karts.map(x=>[x.id,x])); S.parts=new Map(r.parts.map(x=>[x.id,x]));
     S.tOpen=new Map(r.tOpen.map(x=>[x.id,x])); S.tRecent=new Map(r.tRecent.map(x=>[x.id,x]));
@@ -867,7 +870,7 @@ A.dailySave = async ()=>{
   const items=[...document.querySelectorAll('#mBody input[type=checkbox]:checked')].map(x=>x.value); const note=val("fNote");
   if(!items.length && !note){ toast("Tick ít nhất một việc đã làm.","bad"); return; }
   const by=readName(); if(!by) return;
-  const ok=await save(()=>api("addCheck",{date:curDay, by, items, note}), "Đã gửi checklist "+items.length+" mục");
+  const ok=await save(()=>api("addCheck",{date:chkKey(curDay), by, items, note}), "Đã gửi checklist "+items.length+" mục");
   if(ok) closeModal();
 };
 A.maint = d=>{
