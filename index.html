@@ -194,8 +194,8 @@ const ISSUE_CATS = ["Lốp / Mâm","Bạc đạn / Trục","Pin / Sạc","Mạch
 const TYPES = {don:"Đơn", doi:"Đôi"};
 const T_STATUS = {cho:"Chờ sửa", dang:"Đang sửa", doi:"Đợi phụ tùng", xong:"Đã xong", huy:"Đã hủy"};
 const OPEN = ["cho","dang","doi"];
-const mvLabel = m => m.kind==="gom_sua"&&(m.src==="moi"||m.src==="sua") ? "Báo hỏng từ kệ" : (MOVE_LABEL[m.kind]||m.kind);
-const MOVE_LABEL = {cap:"Cấp xuống xưởng", nhap:"Nhập mua kho tổng", xuat:"Xuất / Thay", gom_sua:"Gom hàng hư", nhap_sau_sua:"Sửa được, nhập lại", huy:"Hủy", dieu_chinh:"Điều chỉnh"};
+const mvLabel = m => m.kind==="gom_sua"&&(m.src==="moi"||m.src==="sua"||m.src==="ke") ? "Báo hỏng" : m.kind==="gui_sua" ? "Gửi thợ sửa"+(m.from?" ("+m.from+")":"") : m.kind==="nhap_sau_sua"&&m.loc==="gui" ? "Thợ trả về: sửa được" : m.kind==="huy"&&m.loc==="gui" ? "Thợ trả về: hỏng hẳn" : (MOVE_LABEL[m.kind]||m.kind);
+const MOVE_LABEL = {cap:"Cấp xuống xưởng", nhap:"Nhập mua kho tổng", xuat:"Xuất / Thay", gom_sua:"Gom hàng hư", nhap_sau_sua:"Sửa được, nhập lại", huy:"Hủy", dieu_chinh:"Điều chỉnh", gui_sua:"Gửi thợ sửa"};
 const TABS = [
   ["tong-quan","Tổng quan",'<path d="M3 12l9-8 9 8M5 10v10h5v-6h4v6h5V10"/>'],
   ["xe","Xe",'<circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/><path d="M4 14l2-6h8l3 6M10 8V5h4"/>'],
@@ -300,14 +300,15 @@ function applyMove(a, m){
     case "cap": a.tong-=q; a.moi+=q; break;
     case "xuat": if(m.src==="sua") a.sua-=q; else a.moi-=q; break;
     case "gom_sua": a.cho+=q; if(m.src==="moi"||m.src==="sua") a[m.src]-=q; break;
-    case "nhap_sau_sua": a.cho-=q; a.sua+=q; break;
+    case "nhap_sau_sua": if(m.loc==="gui") a.gui-=q; else a.cho-=q; a.sua+=q; break;
+    case "gui_sua": a.cho-=q; a.gui+=q; break;
     case "huy": { const l=m.loc||(m.from==="tot"?"moi":"cho"); a[l]-=q; break; }
     case "dieu_chinh": { const l=m.loc||"moi"; a[l]+=q; break; }
   }
 }
 function stockMap(uptoMs){
   const res={};
-  for(const p of S.parts.values()){ const b=p.base||{}; res[p.id]={tong:+b.tong||0, moi:+b.moi||0, sua:+b.sua||0, cho:+b.cho||0, at:+b.at||0}; }
+  for(const p of S.parts.values()){ const b=p.base||{}; res[p.id]={tong:+b.tong||0, moi:+b.moi||0, sua:+b.sua||0, cho:+b.cho||0, gui:+b.gui||0, at:+b.at||0}; }
   for(const m of S.moves){ const a=res[m.partId]; if(!a||m.at<=a.at) continue; if(uptoMs!=null&&m.at>uptoMs) continue; applyMove(a,m); }
   for(const k in res) res[k].xuong=res[k].moi+res[k].sua;
   return res;
@@ -418,7 +419,7 @@ function vHome(){
     +'<a class="tile '+(low.length?"t-bad":"t-ok")+'" href="#kho"><span class="k">Kệ xưởng cần cấp</span><span class="v num">'+low.length+'</span><span class="d">hết hoặc dưới ngưỡng kệ xưởng</span></a>'
     +'</section>';
   if(S.pending.length) h+=pendingSection();
-  h+='<section class="quick"><button class="btn pri big" type="button" data-a="newTicket">Báo hỏng xe</button><button class="btn big" type="button" data-a="useParts">Thay / xuất phụ tùng</button><button class="btn big" type="button" data-a="hong">Báo vật tư hỏng (pin, sạc…)</button><button class="btn big" type="button" data-a="dailyCheck">Checklist đầu ngày</button></section>';
+  h+='<section class="quick"><button class="btn pri big" type="button" data-a="newTicket">Báo hỏng xe</button><button class="btn big" type="button" data-a="useParts">Thay / xuất phụ tùng</button><button class="btn big" type="button" data-a="hong">Báo vật tư hỏng</button><button class="btn big" type="button" data-a="dailyCheck">Checklist đầu ngày</button></section>';
   h+='<section class="sec"><div class="sec-h"><h2>Xe đang nằm xưởng</h2><span class="sub">'+ot.length+' phiếu mở, cũ nhất lên đầu</span><div class="act"><a class="btn sm" href="#sua">Tất cả phiếu</a></div></div>';
   h+= ot.length? '<div class="list">'+ot.slice(0,8).map(ticketRow).join("")+'</div>' : '<div class="list"><div class="empty">Không có xe nào đang chờ sửa.</div></div>';
   h+='</section>';
@@ -444,14 +445,14 @@ function partRow(p, st, where){
   const s=st[p.id]||{tong:0,moi:0,sua:0,cho:0,xuong:0}; const ps=partState(p,st,where); const pend=pendingOf(p.id).length;
   let big, sub;
   if(where==="tong"){ big=s.tong; sub=esc(p.group||"")+(+p.threshTong?' · Ngưỡng kho tổng '+esc(p.threshTong):'')+' · Kệ xưởng '+s.xuong; }
-  else { big=s.xuong; sub='Mới '+s.moi+' · Đã sửa '+s.sua+(s.cho?' · Hư chờ kiểm tra '+s.cho:'')+(+p.threshold?' · Ngưỡng '+esc(p.threshold):''); }
+  else { big=s.xuong; sub='Mới '+s.moi+' · Đã sửa '+s.sua+(s.cho?' · Hư chưa gửi thợ '+s.cho:'')+(s.gui?' · Ở chỗ thợ '+s.gui:'')+(+p.threshold?' · Ngưỡng '+esc(p.threshold):''); }
   if(pend) sub+=' · '+pend+' việc chờ xác nhận';
   return '<button class="row" type="button" data-a="part" data-id="'+esc(p.id)+'"><div class="main"><span class="t">'+esc(p.name)+'</span><span class="m">'+sub+'</span></div><div class="r"><span class="big num" style="color:'+(ps?(ps.key==="out"?"var(--bad)":"var(--warn)"):"inherit")+'">'+big+'</span><span class="m">'+esc(p.unit||"")+'</span>'+(ps?'<span class="pill p-'+ps.key+'">'+ps.label+'</span>':'')+'</div></button>';
 }
 function pendingSection(){
   const ps=S.pending.slice().sort((a,b)=>a.at-b.at);
   let h='<section class="sec"><div class="sec-h"><h2>Chờ trưởng bộ phận xác nhận</h2><span class="sub">'+ps.length+' việc</span></div><div class="list">';
-  h+=ps.map(x=>{ const what = x.type==="gom" ? ((x.src==="moi"||x.src==="sua") ? 'Báo hỏng từ kệ ('+(x.src==="sua"?"hàng đã sửa":"hàng mới")+'): <b>'+x.qty+'</b>' : 'Gom hàng hư: <b>'+x.qty+'</b>'+(x.kartLabel?' · từ '+esc(x.kartLabel):'')) : 'Thợ kiểm tra: sửa được <b>'+x.ok+'</b> · hỏng hẳn <b>'+x.bad+'</b>';
+  h+=ps.map(x=>{ const what = x.type==="gom" ? ((x.src==="moi"||x.src==="sua"||x.src==="ke") ? 'Báo hỏng: <b>'+x.qty+'</b>'+(x.note?' · '+esc(x.note):'') : 'Gom hàng hư: <b>'+x.qty+'</b>'+(x.kartLabel?' · từ '+esc(x.kartLabel):'')) : 'Thợ kiểm tra: sửa được <b>'+x.ok+'</b> · hỏng hẳn <b>'+x.bad+'</b>';
     return '<div class="row"><div class="main"><span class="t">'+esc(x.partName)+'</span><span class="m">'+what+'</span><span class="m">'+esc(x.by)+' · '+ago(x.at)+' trước'+(x.note?' · '+esc(x.note):'')+'</span></div>'+(S.isTruong?'<div class="r"><button class="btn sm pri" type="button" data-a="pdOk" data-id="'+esc(x.id)+'">Xác nhận</button><button class="btn sm danger" type="button" data-a="pdNo" data-id="'+esc(x.id)+'">Từ chối</button></div>':'<div class="r"><span class="pill p-cho">Chờ xác nhận</span></div>')+'</div>'; }).join("");
   return h+'</div></section>';
 }
@@ -506,7 +507,7 @@ function vStock(){
   h+='<section class="sec"><div class="sec-h"><h2>'+(loc==="tong"?"Kho tổng":"Kệ xưởng")+'</h2><span class="sub">'+ps.length+' mã · '+low+(loc==="tong"?' cần mua':' cần cấp xuống')+'</span></div>';
   if(S.isTruong) h+='<div class="seg" role="tablist"><button type="button" class="'+(loc==="xuong"?"on":"")+'" data-a="sloc" data-v="xuong">Kệ xưởng</button><button type="button" class="'+(loc==="tong"?"on":"")+'" data-a="sloc" data-v="tong">Kho tổng</button></div>';
   if(loc==="xuong"){
-    h+='<div class="quick"><button class="btn pri" type="button" data-a="useParts">Thay / xuất cho xe</button><button class="btn" type="button" data-a="hong">Báo vật tư hỏng</button><a class="btn" href="#vat-tu-hong">Vật tư hỏng đã báo</a><button class="btn" type="button" data-a="mv" data-k="gom_sua">Gom đồ hư tháo từ xe</button>'+(S.isTruong?'<button class="btn" type="button" data-a="ktra">Ghi kết quả kiểm tra hàng hư</button>':'')+'<button class="btn" type="button" data-a="mv" data-k="huy">Hủy hàng lỗi</button>'
+    h+='<div class="quick"><button class="btn pri" type="button" data-a="useParts">Thay / xuất cho xe</button><button class="btn" type="button" data-a="hong">Báo vật tư hỏng</button><a class="btn" href="#vat-tu-hong">Vật tư hỏng / gửi thợ</a><button class="btn" type="button" data-a="mv" data-k="gom_sua">Gom đồ hư tháo từ xe</button>'+(S.isTruong?'<button class="btn" type="button" data-a="gui">Gửi thợ sửa</button><button class="btn" type="button" data-a="ktra">Ghi kết quả sửa</button>':'')+'<button class="btn" type="button" data-a="mv" data-k="huy">Hủy hàng lỗi</button>'
       +(S.isTruong?'<button class="btn" type="button" data-a="mv" data-k="cap">Cấp từ kho tổng xuống</button><button class="btn" type="button" data-a="mv" data-k="dieu_chinh" data-loc="xuong">Kiểm kê kệ xưởng</button>':'')+'</div>';
   } else {
     const need=sortedParts().filter(p=>partState(p,st,"tong"));
@@ -573,17 +574,19 @@ function vHistory(){
 }
 function dcTables(rows){
   const neg=v=>v<0?'<b style="color:var(--bad)">'+v+'</b>':v>0?'<b style="color:var(--warn)">+'+v+'</b>':'0';
-  const T1=[], T2=[], T3=[], T4=[];
+  const T1=[], T2=[], T3=[], T4=[], T5=[];
   rows.forEach(r=>{ const a=r.a, s0=r.start, s1=r.end;
     const x0=s0.moi+s0.sua, A=a.cap, B=a.xuatMoi+a.xuatSua, C=a.suaDuoc, H=a.huyMoi+a.huySua, K=a.hong||0, so=x0+A-B-K+C-H, dcx=a.dcMoi+a.dcSua, x1=s1.moi+s1.sua;
     T1.push({r, cells:[x0,A,B,K,C,H,so,dcx,x1], key:dcx, act:A||B||K||C||H||dcx});
     const unk=B-a.gom-a.bo;
     T2.push({r, cells:[B,a.gom,a.bo,unk], key:unk, act:B||a.gom||a.bo});
-    T3.push({r, cells:[s0.cho,a.gom+(a.hong||0),a.suaDuoc,a.huyCho,a.dcCho,s1.cho], key:a.dcCho, act:a.gom||a.hong||a.suaDuoc||a.huyCho||a.dcCho});
+    const sc=a.suaCho!=null?a.suaCho:a.suaDuoc, gd=a.guiDi||0;
+    T3.push({r, cells:[s0.cho,a.gom+(a.hong||0),gd,sc,a.huyCho,a.dcCho,s1.cho], key:a.dcCho, act:a.gom||a.hong||gd||sc||a.huyCho||a.dcCho});
+    T5.push({r, cells:[s0.gui||0,gd,a.suaGui||0,a.huyGui||0,a.dcGui||0,s1.gui||0], key:a.dcGui||0, act:gd||a.suaGui||a.huyGui||a.dcGui||s0.gui||s1.gui});
     const t0=s0.tong, soT=t0+a.nhap-a.cap-a.huyTong;
     T4.push({r, cells:[t0,a.nhap,a.cap,a.huyTong,soT,a.dcTong,s1.tong], key:a.dcTong, act:a.nhap||a.cap||a.huyTong||a.dcTong});
   });
-  return {T1,T2,T3,T4,neg};
+  return {T1,T2,T3,T4,T5,neg};
 }
 function vDoiChieu(){
   if(!S.isEditor) return '<div class="banner">Chỉ quản lý mới xem được trang Đối chiếu.</div>';
@@ -594,7 +597,7 @@ function vDoiChieu(){
   if(!R){ h+='<div class="card small muted">Chọn kỳ rồi bấm Xem đối chiếu. Số "chênh lệch" lấy từ các lần kiểm kê trong kỳ; muốn có số chênh lệch thì cuối kỳ phải kiểm kê (trưởng bộ phận đếm kệ xưởng, bạn đếm kho tổng).</div>'; return h+'</section>'; }
   if(R.loading){ h+='<div class="card muted">Đang tính…</div>'; return h+'</section>'; }
   if(R.error){ h+='<div class="banner bad">'+esc(R.error)+'</div>'; return h+'</section>'; }
-  const {T1,T2,T3,T4,neg}=dcTables(R.rows);
+  const {T1,T2,T3,T4,T5,neg}=dcTables(R.rows);
   const sum=(T,i)=>T.reduce((a,x)=>a+x.cells[i],0);
   const lossX=sum(T1,7), lossT=sum(T4,5), unk=T2.reduce((a,x)=>a+Math.max(0,x.cells[3]),0), pend=S.pending.filter(x=>x.type==="gom").reduce((a,x)=>a+x.qty,0);
   h+='<section class="tiles"><div class="tile '+(lossX<0?"t-bad":"t-ok")+'"><span class="k">Chênh lệch kệ xưởng</span><span class="v num">'+lossX+'</span><span class="d">tổng các lần kiểm kê trong kỳ</span></div><div class="tile '+(lossT<0?"t-bad":"t-ok")+'"><span class="k">Chênh lệch kho tổng</span><span class="v num">'+lossT+'</span><span class="d">tổng các lần kiểm kê trong kỳ</span></div><div class="tile '+(unk?"t-warn":"t-ok")+'"><span class="k">Đồ cũ chưa thu về</span><span class="v num">'+unk+'</span><span class="d">thay mới nhưng chưa gom/không báo bỏ'+(pend?' · '+pend+' đang chờ xác nhận':'')+'</span></div><div class="tile t-info"><span class="k">Kho tổng cấp xuống</span><span class="v num">'+sum(T1,1)+'</span><span class="d">nhân viên thay cho xe '+sum(T1,2)+'</span></div></section>';
@@ -603,8 +606,9 @@ function vDoiChieu(){
     return '<div class="sec-h"><h2 style="font-size:18px">'+title+'</h2><span class="sub">'+sub+'</span></div>'+(rows.length?'<div class="tbl-wrap"><table><thead><tr><th>Vật tư</th>'+heads.map(x=>'<th class="n">'+x+'</th>').join("")+'</tr></thead><tbody>'+rows.map(x=>'<tr><td>'+esc(x.r.name)+'<div class="small muted">'+esc(x.r.group)+'</div></td>'+x.cells.map((c,i)=>'<td class="n">'+(i===dcIdx?neg(c):c)+'</td>').join("")+'</tr>').join("")+'</tbody></table></div>':'<div class="card small muted">Không có phát sinh trong kỳ.</div>'); };
   h+=tbl("1. Kệ xưởng","cuối kỳ = đầu + cấp xuống − thay cho xe − báo hỏng + sửa được − hủy ± chênh lệch",["Đầu kỳ","Cấp xuống","Thay cho xe","Báo hỏng","Sửa được về kệ","Hủy tại kệ","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T1,7);
   h+=tbl("2. Đồ cũ thu về","mỗi cái thay mới phải có đồ cũ gom về hoặc báo bỏ",["Thay cho xe","Gom về (đã xác nhận)","Báo bỏ","Chưa rõ"],T2,3);
-  h+=tbl("3. Hàng hư chờ kiểm tra","",["Đầu kỳ","Gom vào + báo hỏng","Sửa được","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3,4);
+  h+=tbl("3. Hàng hư chưa gửi thợ","cuối kỳ = đầu + gom vào − gửi thợ − sửa được − hỏng hẳn ± chênh lệch",["Đầu kỳ","Gom vào + báo hỏng","Gửi thợ","Sửa được (tại xưởng)","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3,5);
   h+=tbl("4. Kho tổng","cuối kỳ = đầu + nhập mua − cấp xuống − hủy ± chênh lệch",["Đầu kỳ","Nhập mua","Cấp xuống","Hủy","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T4,5);
+  h+=tbl("5. Đang ở chỗ thợ","cuối kỳ = đầu + gửi đi − thợ trả về (sửa được + hỏng hẳn)",["Đầu kỳ","Gửi đi","Sửa được trả về","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T5,4);
   h+='<div class="inline"><button class="btn" type="button" data-a="dcExport">Xuất đối chiếu ra Excel</button></div>';
   return h+'</section>';
 }
@@ -650,7 +654,7 @@ function kartSelect(id, sel, allowNone){
 function partSelect(id, sel, filterFn, where){
   const st=stockMap(); let g=null, h='<select id="'+id+'"><option value="">Chọn phụ tùng…</option>';
   for(const p of sortedParts().filter(filterFn||(()=>true))){ if(p.group!==g){ if(g!==null) h+='</optgroup>'; g=p.group; h+='<optgroup label="'+esc(g||"Khác")+'">'; } const s=st[p.id]||{tong:0,moi:0,sua:0,cho:0,xuong:0};
-    const lab = where==="tong" ? 'kho tổng '+s.tong : where==="cho" ? 'hư chờ kiểm tra '+s.cho : 'kệ xưởng '+s.xuong+(s.sua?' (đã sửa '+s.sua+')':'');
+    const lab = where==="tong" ? 'kho tổng '+s.tong : where==="cho" ? 'hư chưa gửi thợ '+s.cho+(s.gui?' · ở chỗ thợ '+s.gui:'') : 'kệ xưởng '+s.xuong+(s.sua?' (đã sửa '+s.sua+')':'');
     h+='<option value="'+esc(p.id)+'" '+(p.id===sel?"selected":"")+'>'+esc(p.name)+' – '+lab+'</option>'; }
   return h+(g!==null?'</optgroup>':'')+'</select>';
 }
@@ -787,98 +791,133 @@ A.mvSave = async d=>{
 /* ---------- báo vật tư hỏng (không gắn với xe) ---------- */
 A.hong = d=>{
   if(!guardWrite()) return;
-  const st=stockMap(); const coKe=p=>{ const s=st[p.id]||{}; return (s.moi||0)+(s.sua||0)>0 || p.id===d.part; };
+  const st=stockMap(); const coKe=p=>((st[p.id]||{}).xuong||0)>0 || p.id===d.part;
   if(!sortedParts().some(coKe)){ toast("Kệ xưởng chưa có vật tư nào.","bad"); return; }
   modal("Báo vật tư hỏng",
-    '<div class="small muted">Dùng khi vật tư trên kệ xưởng bị hỏng lúc đang dùng (pin, sạc…), không gắn với xe nào. Hỏng do tháo ra khi thay cho xe thì ghi ở phần Thay phụ tùng.</div>'
-   +'<div class="f"><label for="fPart">Vật tư hỏng</label>'+partSelect("fPart", d.part||"", coKe, "xuong")+'</div>'
+    '<div class="f"><label for="fPart">Vật tư hỏng</label>'+partSelect("fPart", d.part||"", coKe, "xuong")+'</div>'
    +'<div class="f"><label for="fQty">Số lượng hỏng</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
-   +'<div class="f"><span class="lb">Cái hỏng là hàng nào?</span><div class="opts" id="fSrcBox"></div></div>'
    +'<div class="f"><label for="fNote">Hỏng thế nào?</label><input id="fNote" type="text" placeholder="Ví dụ: pin không giữ điện, sạc không lên đèn"></div>'
    +nameField("fBy","Người báo")
-   +(S.isTruong?'':'<div class="small muted">Trưởng bộ phận xác nhận đã nhận đồ hỏng thì kệ xưởng mới trừ và chuyển sang hàng hư chờ kiểm tra.</div>'),
+   +'<div class="small muted">'+(S.isTruong?'Kệ xưởng trừ ngay, đồ hỏng chuyển sang hàng hư chưa gửi thợ.':'Trưởng bộ phận nhận đồ hỏng và xác nhận thì kệ xưởng mới trừ.')+' Đồ cũ tháo ra khi thay cho xe thì ghi ở phần Thay phụ tùng.</div>',
     '<button class="btn pri" type="button" data-a="hongSave">Gửi báo hỏng</button>');
-  const ve=()=>{ const s=st[val("fPart")]||{moi:0,sua:0}; const box=$("#fSrcBox"); if(!box) return;
-    const cur=(document.querySelector('input[name=fSrc]:checked')||{}).value;
-    const opts=[["moi","Hàng mới (đang có "+(s.moi||0)+")"],["sua","Hàng đã sửa, hư lại (đang có "+(s.sua||0)+")"]];
-    const def = cur || ((s.moi||0)>0||!(s.sua>0) ? "moi" : "sua");
-    box.innerHTML=opts.map(([v,l])=>'<label class="opt"><input type="radio" name="fSrc" value="'+v+'" '+(v===def?"checked":"")+'> '+l+'</label>').join(""); };
-  ve(); const sel=$("#fPart"); if(sel) sel.addEventListener("change",ve);
 };
 A.hongSave = async ()=>{
   const partId=val("fPart"), qty=num("fQty"), note=val("fNote");
   if(!partId){ toast("Chọn vật tư hỏng.","bad"); return; }
   if(!Number.isInteger(qty)||qty<=0){ toast("Nhập số lượng hỏng.","bad"); return; }
-  const src=(document.querySelector('input[name=fSrc]:checked')||{}).value||"moi";
-  const s=stockMap()[partId]||{moi:0,sua:0};
-  if(qty>(s[src]||0)){ toast("Kệ xưởng chỉ còn "+(s[src]||0)+" "+(src==="sua"?"hàng đã sửa":"hàng mới")+".","bad",5000); return; }
+  const s=stockMap()[partId]||{xuong:0};
+  if(qty>(s.xuong||0)){ toast("Kệ xưởng chỉ còn "+(s.xuong||0)+" cái.","bad",5000); return; }
   if(!note){ toast("Ghi ngắn gọn hỏng thế nào.","bad"); return; }
   const by=readName(); if(!by) return;
-  const r=await save(()=>api("addMoves",[{kind:"gom_sua", src, partId, qty, by, note}]));
-  if(r){ closeModal(); toast(r.pending? "Đã gửi báo hỏng, chờ trưởng bộ phận xác nhận." : "Đã ghi: "+qty+" "+partLabel(S.parts.get(partId))+" hỏng, chuyển sang hàng hư chờ kiểm tra.","ok",5000); }
+  const r=await save(()=>api("addMoves",[{kind:"gom_sua", src:"ke", partId, qty, by, note}]));
+  if(r){ closeModal(); toast(r.pending? "Đã gửi báo hỏng, chờ trưởng bộ phận xác nhận." : "Đã ghi: "+qty+" "+partLabel(S.parts.get(partId))+" hỏng, chờ gửi thợ sửa.","ok",5000); }
+};
+/* gửi thợ sửa: hàng hư chưa gửi → đang ở chỗ thợ */
+A.gui = d=>{
+  if(!guardWrite()) return;
+  if(!S.isTruong){ toast("Chỉ trưởng bộ phận ghi gửi thợ sửa.","bad"); return; }
+  const st=stockMap(); const co=p=>((st[p.id]||{}).cho||0)>0;
+  if(!sortedParts().some(co)){ toast("Không có hàng hư nào chưa gửi thợ.","ok",5000); return; }
+  modal("Gửi thợ sửa",
+    '<div class="f"><label for="fPart">Vật tư gửi sửa</label>'+partSelect("fPart", d.part||"", co, "cho")+'</div>'
+   +'<div class="f"><label for="fQty">Số lượng gửi</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
+   +'<div class="f"><label for="fTho">Gửi cho thợ / tiệm nào?</label><input id="fTho" type="text" placeholder="Ví dụ: Anh Tuấn, tiệm điện Hòa Phát"></div>'
+   +'<div class="f"><label for="fNote">Ghi chú (không bắt buộc)</label><input id="fNote" type="text" placeholder="Ví dụ: hẹn 3 ngày lấy"></div>'
+   +nameField("fBy","Người gửi"),
+    '<button class="btn pri" type="button" data-a="guiSave">Ghi đã gửi thợ</button>');
+};
+A.guiSave = async ()=>{
+  const partId=val("fPart"), qty=num("fQty"), tho=val("fTho"), note=val("fNote");
+  if(!partId){ toast("Chọn vật tư.","bad"); return; }
+  if(!Number.isInteger(qty)||qty<=0){ toast("Nhập số lượng gửi.","bad"); return; }
+  const s=stockMap()[partId]||{cho:0};
+  if(qty>(s.cho||0)){ toast("Chỉ có "+(s.cho||0)+" cái hư chưa gửi thợ.","bad",5000); return; }
+  if(!tho){ toast("Ghi tên thợ hoặc tiệm nhận sửa.","bad"); return; }
+  const by=readName(); if(!by) return;
+  const r=await save(()=>api("addMoves",[{kind:"gui_sua", partId, qty, tho, note, by}]));
+  if(r){ closeModal(); toast("Đã ghi gửi "+qty+" "+partLabel(S.parts.get(partId))+" cho "+tho+".","ok",5000); }
 };
 function hongData(){
-  const tuKe=m=>m.kind==="gom_sua"&&(m.src==="moi"||m.src==="sua");
+  const tuKe=m=>m.kind==="gom_sua"&&(m.src==="moi"||m.src==="sua"||m.src==="ke");
   const reps=S.moves.filter(tuKe).slice().sort((a,b)=>b.at-a.at);
-  const pend=S.pending.filter(x=>x.type==="gom"&&(x.src==="moi"||x.src==="sua")).slice().sort((a,b)=>b.at-a.at);
+  const guis=S.moves.filter(m=>m.kind==="gui_sua").slice().sort((a,b)=>b.at-a.at);
+  const pend=S.pending.filter(x=>x.type==="gom"&&(x.src==="moi"||x.src==="sua"||x.src==="ke")).slice().sort((a,b)=>b.at-a.at);
   const st=stockMap(); const agg={};
-  const g=id=>agg[id]=agg[id]||{bao:0,cho:0,sua:0,huy:0};
+  const g=id=>agg[id]=agg[id]||{bao:0,cho:0,gui:0,sua:0,huy:0};
   reps.forEach(m=>g(m.partId).bao+=Number(m.qty)||0);
   pend.forEach(x=>g(x.partId).cho+=Number(x.qty)||0);
-  S.moves.forEach(m=>{ if(!agg[m.partId]) return; const q=Number(m.qty)||0; if(m.kind==="nhap_sau_sua") agg[m.partId].sua+=q; else if(m.kind==="huy"&&(m.loc||"cho")==="cho") agg[m.partId].huy+=q; });
-  const rows=sortedParts().filter(p=>agg[p.id]).map(p=>({p, a:agg[p.id], s:st[p.id]||{}}));
-  return {reps, pend, rows};
+  for(const id in st){ if((st[id].cho||0)>0||(st[id].gui||0)>0) g(id); }
+  S.moves.forEach(m=>{ const q=Number(m.qty)||0;
+    if(m.kind==="gui_sua") g(m.partId).gui+=q;
+    else if(m.kind==="nhap_sau_sua") g(m.partId).sua+=q;
+    else if(m.kind==="huy"&&(m.loc==="cho"||m.loc==="gui"||(!m.loc&&m.from!=="tot"))) g(m.partId).huy+=q; });
+  const rows=sortedParts().filter(p=>agg[p.id]&&(agg[p.id].bao||agg[p.id].cho||(st[p.id]||{}).cho||(st[p.id]||{}).gui||agg[p.id].gui)).map(p=>({p, a:agg[p.id], s:st[p.id]||{}}));
+  return {reps, guis, pend, rows};
 }
 function vHong(){
   const D=hongData(); const since=Number(S.config.closingAt)||0;
-  let h='<section class="sec"><div class="sec-h"><h2>Vật tư hỏng</h2><span class="sub">vật tư trên kệ báo hỏng lúc đang dùng'+(since?', từ lần chốt sổ '+fmtD(since):'')+'</span>'+(S.readOnly?'':'<div class="act"><button class="btn pri sm" type="button" data-a="hong">Báo vật tư hỏng</button></div>')+'</div>';
-  const tong=D.rows.reduce((a,r)=>a+r.a.bao,0), cho=D.pend.reduce((a,x)=>a+x.qty,0), kt=D.rows.reduce((a,r)=>a+(r.s.cho||0),0);
-  h+='<section class="tiles"><div class="tile t-bad"><span class="k">Đã báo hỏng</span><span class="v num">'+tong+'</span><span class="d">đã xác nhận</span></div><div class="tile t-warn"><span class="k">Chờ xác nhận</span><span class="v num">'+cho+'</span><span class="d">'+D.pend.length+' lần báo</span></div><div class="tile t-info"><span class="k">Đang chờ kiểm tra</span><span class="v num">'+kt+'</span><span class="d">của các vật tư này</span></div></section>';
-  if(S.isTruong && kt) h+='<div class="inline"><button class="btn" type="button" data-a="ktra">Ghi kết quả kiểm tra hàng hư</button></div>';
-  h+= D.rows.length ? '<div class="tbl-wrap"><table><thead><tr><th>Vật tư</th><th class="n">Đã báo hỏng</th><th class="n">Chờ xác nhận</th><th class="n">Đang chờ kiểm tra</th><th class="n">Sửa được</th><th class="n">Hỏng hẳn</th><th class="n">Kệ còn dùng được</th></tr></thead><tbody>'
-    +D.rows.map(r=>'<tr><td>'+esc(r.p.name)+'<div class="small muted">'+esc(r.p.group)+'</div></td><td class="n"><b>'+r.a.bao+'</b></td><td class="n">'+r.a.cho+'</td><td class="n">'+(r.s.cho||0)+'</td><td class="n">'+r.a.sua+'</td><td class="n">'+r.a.huy+'</td><td class="n">'+((r.s.moi||0)+(r.s.sua||0))+'</td></tr>').join("")+'</tbody></table></div><div class="small muted">Sửa được, hỏng hẳn và đang chờ kiểm tra tính chung cả đồ hư tháo từ xe của cùng vật tư.</div>'
+  let h='<section class="sec"><div class="sec-h"><h2>Vật tư hỏng</h2><span class="sub">báo hỏng, gửi thợ sửa, thợ trả về'+(since?' · từ lần chốt sổ '+fmtD(since):'')+'</span></div>';
+  if(!S.readOnly) h+='<div class="inline"><button class="btn pri" type="button" data-a="hong">Báo vật tư hỏng</button>'+(S.isTruong?'<button class="btn" type="button" data-a="gui">Gửi thợ sửa</button><button class="btn" type="button" data-a="ktra">Ghi kết quả sửa</button>':'')+'</div>';
+  const sum=f=>D.rows.reduce((a,r)=>a+f(r),0);
+  const bao=sum(r=>r.a.bao), choXN=D.pend.reduce((a,x)=>a+x.qty,0), chuaGui=sum(r=>r.s.cho||0), oTho=sum(r=>r.s.gui||0);
+  h+='<section class="tiles"><div class="tile t-bad"><span class="k">Đã báo hỏng</span><span class="v num">'+bao+'</span><span class="d">'+(choXN?choXN+' cái chờ xác nhận':'đã xác nhận')+'</span></div>'
+    +'<div class="tile '+(chuaGui?'t-warn':'t-ok')+'"><span class="k">Chưa gửi thợ</span><span class="v num">'+chuaGui+'</span><span class="d">đồ hỏng đang nằm ở xưởng</span></div>'
+    +'<div class="tile t-info"><span class="k">Đang ở chỗ thợ</span><span class="v num">'+oTho+'</span><span class="d">đã gửi, chưa trả về</span></div></section>';
+  h+= D.rows.length ? '<div class="tbl-wrap"><table><thead><tr><th>Vật tư</th><th class="n">Đã báo hỏng</th><th class="n">Chờ xác nhận</th><th class="n">Chưa gửi thợ</th><th class="n">Đang ở chỗ thợ</th><th class="n">Đã gửi thợ</th><th class="n">Sửa được</th><th class="n">Hỏng hẳn</th><th class="n">Kệ còn dùng được</th></tr></thead><tbody>'
+    +D.rows.map(r=>'<tr><td>'+esc(r.p.name)+'<div class="small muted">'+esc(r.p.group)+'</div></td><td class="n"><b>'+r.a.bao+'</b></td><td class="n">'+r.a.cho+'</td><td class="n">'+((r.s.cho||0)?'<b style="color:var(--warn)">'+r.s.cho+'</b>':0)+'</td><td class="n">'+(r.s.gui||0)+'</td><td class="n">'+r.a.gui+'</td><td class="n">'+r.a.sua+'</td><td class="n">'+r.a.huy+'</td><td class="n">'+(r.s.xuong||0)+'</td></tr>').join("")+'</tbody></table></div><div class="small muted">Chưa gửi thợ, đang ở chỗ thợ, sửa được và hỏng hẳn tính chung cả đồ hư tháo từ xe của cùng vật tư.</div>'
     : '<div class="card small muted">Chưa có vật tư nào bị báo hỏng.</div>';
-  const list=D.pend.map(x=>({at:x.at,partId:x.partId,qty:x.qty,src:x.src,note:x.note,by:x.by,cho:1})).concat(D.reps.map(m=>({at:m.at,partId:m.partId,qty:m.qty,src:m.src,note:m.note,by:m.by})));
+  if(D.guis.length){
+    h+='<div class="sec-h"><h2 style="font-size:18px">Các lần gửi thợ</h2><span class="sub">'+D.guis.length+' lần</span></div>';
+    h+='<div class="list">'+D.guis.slice(0,100).map(m=>'<div class="row"><div class="main"><span class="t">'+esc(partLabel(S.parts.get(m.partId)))+' × '+m.qty+'</span><span class="m">Gửi cho: '+esc(m.from||"?")+(m.note?' · '+esc(m.note):'')+'</span><span class="m">'+esc(m.by||"")+' · '+fmtT(m.at)+'</span></div></div>').join("")+'</div>';
+  }
+  const list=D.pend.map(x=>({at:x.at,partId:x.partId,qty:x.qty,note:x.note,by:x.by,cho:1})).concat(D.reps.map(m=>({at:m.at,partId:m.partId,qty:m.qty,note:m.note,by:m.by})));
   h+='<div class="sec-h"><h2 style="font-size:18px">Các lần báo hỏng</h2><span class="sub">'+list.length+' lần</span></div>';
-  h+= list.length ? '<div class="list">'+list.slice(0,200).map(x=>'<div class="row"><div class="main"><span class="t">'+esc(partLabel(S.parts.get(x.partId)))+' × '+x.qty+'</span><span class="m">'+esc(x.note||"")+'</span><span class="m">'+esc(x.by||"")+' · '+fmtT(x.at)+' · '+(x.src==="sua"?"hàng đã sửa":"hàng mới")+'</span></div><div class="r">'+(x.cho?'<span class="pill p-cho">Chờ xác nhận</span>':'<span class="pill p-out">Đã ghi</span>')+'</div></div>').join("")+'</div>' : '';
-  if(list.length) h+='<div class="inline"><button class="btn" type="button" data-a="hongExport">Xuất vật tư hỏng ra Excel</button></div>';
+  h+= list.length ? '<div class="list">'+list.slice(0,200).map(x=>'<div class="row"><div class="main"><span class="t">'+esc(partLabel(S.parts.get(x.partId)))+' × '+x.qty+'</span><span class="m">'+esc(x.note||"")+'</span><span class="m">'+esc(x.by||"")+' · '+fmtT(x.at)+'</span></div><div class="r">'+(x.cho?'<span class="pill p-cho">Chờ xác nhận</span>':'<span class="pill p-out">Đã ghi</span>')+'</div></div>').join("")+'</div>' : '';
+  if(list.length||D.guis.length) h+='<div class="inline"><button class="btn" type="button" data-a="hongExport">Xuất vật tư hỏng ra Excel</button></div>';
   return h+'</section>';
 }
 A.hongExport = (d,btn)=>{
   const D=hongData();
-  const t1=[["Nhóm","Vật tư","Đơn vị","Đã báo hỏng","Chờ xác nhận","Đang chờ kiểm tra","Sửa được","Hỏng hẳn","Kệ còn dùng được"]].concat(D.rows.map(r=>[r.p.group,r.p.name,r.p.unit||"",r.a.bao,r.a.cho,r.s.cho||0,r.a.sua,r.a.huy,(r.s.moi||0)+(r.s.sua||0)]));
-  const t2=[["Thời gian","Nhóm","Vật tư","Số lượng","Hàng","Hỏng thế nào","Người báo","Trạng thái"]].concat(D.pend.map(x=>[fmtT(x.at),(S.parts.get(x.partId)||{}).group||"",x.partName,x.qty,x.src==="sua"?"Đã sửa":"Mới",x.note||"",x.by||"","Chờ xác nhận"])).concat(D.reps.map(m=>{ const p=S.parts.get(m.partId)||{}; return [fmtT(m.at),p.group||"",p.name||m.partName,m.qty,m.src==="sua"?"Đã sửa":"Mới",m.note||"",m.by||"","Đã ghi"]; }));
-  return xuatNut(btn, "Xuất vật tư hỏng ra Excel", "Vật tư hỏng Gokart "+fmtD(Date.now()), [{name:"Tổng hợp",rows:t1},{name:"Các lần báo",rows:t2}]);
+  const t1=[["Nhóm","Vật tư","Đơn vị","Đã báo hỏng","Chờ xác nhận","Chưa gửi thợ","Đang ở chỗ thợ","Đã gửi thợ","Sửa được","Hỏng hẳn","Kệ còn dùng được"]].concat(D.rows.map(r=>[r.p.group,r.p.name,r.p.unit||"",r.a.bao,r.a.cho,r.s.cho||0,r.s.gui||0,r.a.gui,r.a.sua,r.a.huy,r.s.xuong||0]));
+  const t2=[["Thời gian","Nhóm","Vật tư","Số lượng","Hỏng thế nào","Người báo","Trạng thái"]].concat(D.pend.map(x=>[fmtT(x.at),(S.parts.get(x.partId)||{}).group||"",x.partName,x.qty,x.note||"",x.by||"","Chờ xác nhận"])).concat(D.reps.map(m=>{ const p=S.parts.get(m.partId)||{}; return [fmtT(m.at),p.group||"",p.name||m.partName,m.qty,m.note||"",m.by||"","Đã ghi"]; }));
+  const t3=[["Thời gian","Nhóm","Vật tư","Số lượng","Gửi cho","Ghi chú","Người gửi"]].concat(D.guis.map(m=>{ const p=S.parts.get(m.partId)||{}; return [fmtT(m.at),p.group||"",p.name||m.partName,m.qty,m.from||"",m.note||"",m.by||""]; }));
+  return xuatNut(btn, "Xuất vật tư hỏng ra Excel", "Vật tư hỏng Gokart "+fmtD(Date.now()), [{name:"Tổng hợp",rows:t1},{name:"Các lần báo hỏng",rows:t2},{name:"Các lần gửi thợ",rows:t3}]);
 };
 A.sloc = d=>{ S.ui.stockLoc=d.v; render(); };
 A.ktra = d=>{
   if(!guardWrite()) return;
-  if(!S.isTruong){ toast("Chỉ trưởng bộ phận ghi kết quả kiểm tra hàng hư.","bad"); return; }
-  const st=stockMap(); const has=sortedParts().filter(p=>(st[p.id]||{}).cho>0);
-  if(!has.length){ toast("Không có hàng hư nào đang chờ kiểm tra.","ok",5000); return; }
-  modal("Kết quả kiểm tra hàng hư",
-    '<div class="small muted">Sau khi thợ xem xong, trưởng bộ phận ghi số cái sửa được (về kệ xưởng, dùng trước hàng mới) và số cái hỏng hẳn (hủy). Số còn lại tiếp tục chờ kiểm tra.</div>'
-   +'<div class="f"><label for="fPart">Phụ tùng</label>'+partSelect("fPart", d.part||"", p=>(st[p.id]||{}).cho>0, "cho")+'</div>'
+  if(!S.isTruong){ toast("Chỉ trưởng bộ phận ghi kết quả sửa.","bad"); return; }
+  const st=stockMap(); const co=p=>{ const s=st[p.id]||{}; return (s.cho||0)>0||(s.gui||0)>0; };
+  if(!sortedParts().some(co)){ toast("Không có hàng hư nào chưa gửi thợ hay đang ở chỗ thợ.","ok",5000); return; }
+  modal("Ghi kết quả sửa",
+    '<div class="small muted">Ghi số cái sửa được (về kệ xưởng, dùng trước hàng mới) và số cái hỏng hẳn (hủy).</div>'
+   +'<div class="f"><label for="fPart">Vật tư</label>'+partSelect("fPart", d.part||"", co, "cho")+'</div>'
+   +'<div class="f"><span class="lb">Hàng ở đâu?</span><div class="opts" id="fFromBox"></div></div>'
    +'<div class="f2"><div class="f"><label for="fOk">Sửa được</label><input id="fOk" type="number" inputmode="numeric" min="0" step="1" value="0"></div><div class="f"><label for="fBad">Hỏng hẳn, hủy</label><input id="fBad" type="number" inputmode="numeric" min="0" step="1" value="0"></div></div>'
-   +'<div class="f"><label for="fTho">Thợ đã kiểm tra (không bắt buộc)</label><input id="fTho" type="text" placeholder="Tên thợ hoặc tiệm sửa"></div>'
+   +'<div class="f"><label for="fTho">Thợ sửa (không bắt buộc)</label><input id="fTho" type="text" placeholder="Tên thợ hoặc tiệm sửa"></div>'
    +'<div class="f"><label for="fNote">Ghi chú</label><input id="fNote" type="text" placeholder="Ví dụ: thay tụ, chập mạch không cứu được"></div>'+nameField("fBy","Trưởng bộ phận xác nhận"),
     '<button class="btn pri" type="button" data-a="ktraSave">Xác nhận kết quả</button>');
+  const ve=()=>{ const s=st[val("fPart")]||{cho:0,gui:0}; const box=$("#fFromBox"); if(!box) return;
+    const opts=[]; if(s.gui>0) opts.push(["gui","Thợ trả về (đang ở chỗ thợ "+s.gui+")"]); if(s.cho>0) opts.push(["cho","Kiểm tra tại xưởng, chưa gửi thợ ("+s.cho+")"]);
+    box.innerHTML=opts.map(([v,l],i)=>'<label class="opt"><input type="radio" name="fFrom" value="'+v+'" '+(i===0?"checked":"")+'> '+l+'</label>').join("")||'<span class="small muted">Chọn vật tư</span>'; };
+  ve(); const sel=$("#fPart"); if(sel) sel.addEventListener("change",ve);
 };
 A.ktraSave = async ()=>{
   const partId=val("fPart"), ok=num("fOk"), bad=num("fBad");
   if(!partId){ toast("Chọn phụ tùng.","bad"); return; }
   if(!Number.isInteger(ok)||!Number.isInteger(bad)||ok<0||bad<0||ok+bad===0){ toast("Nhập số sửa được và/hoặc số hỏng hẳn.","bad"); return; }
-  const st=stockMap()[partId]||{cho:0}; const waiting=S.pending.filter(x=>x.type==="ktra"&&x.partId===partId).reduce((a,x)=>a+x.ok+x.bad,0);
-  if(ok+bad+waiting>st.cho){ toast("Chỉ có "+st.cho+" cái chờ kiểm tra"+(waiting?" ("+waiting+" cái đã gửi, đang chờ xác nhận)":"")+".","bad",6000); return; }
+  const from=(document.querySelector('input[name=fFrom]:checked')||{}).value||"cho";
+  const st=stockMap()[partId]||{cho:0,gui:0}; const co=from==="gui"?(st.gui||0):(st.cho||0);
+  if(ok+bad>co){ toast((from==="gui"?"Thợ đang giữ ":"Chỉ có ")+co+" cái"+(from==="gui"?"":" chưa gửi thợ")+".","bad",6000); return; }
   const by=readName(); if(!by) return;
   const note=[val("fTho")?"Thợ: "+val("fTho"):"", val("fNote")].filter(Boolean).join(" · ");
-  const r=await save(()=>api("submitKtra",{partId, ok, bad, by, note}));
+  const r=await save(()=>api("submitKtra",{partId, ok, bad, by, note, from}));
   if(r){ closeModal(); toast(r.pending?"Đã gửi kết quả, chờ trưởng bộ phận xác nhận.":"Đã lưu: "+ok+" sửa được, "+bad+" hủy","ok",5000); }
 };
 A.pdOk = d=>{
   const x=S.pending.find(y=>y.id===d.id); if(!x) return;
   const body = x.type==="gom"
-    ? ((x.src==="moi"||x.src==="sua") ? '<div class="small">'+esc(x.by)+' báo hỏng <b>'+esc(x.partName)+'</b> ('+(x.src==="sua"?"hàng đã sửa":"hàng mới")+')'+(x.note?': '+esc(x.note):'')+'. Nhận đồ hỏng, kiểm số rồi xác nhận: kệ xưởng sẽ trừ và chuyển sang hàng hư chờ kiểm tra.</div>' : '<div class="small">'+esc(x.by)+' gom <b>'+esc(x.partName)+'</b>'+(x.kartLabel?' tháo từ '+esc(x.kartLabel):'')+'. Kiểm số đồ thực nhận rồi xác nhận.</div>')+'<div class="f"><label for="pQty">Số thực nhận</label><input id="pQty" type="number" min="0" step="1" value="'+x.qty+'"></div>'
+    ? ((x.src==="moi"||x.src==="sua"||x.src==="ke") ? '<div class="small">'+esc(x.by)+' báo hỏng <b>'+esc(x.partName)+'</b>'+(x.note?': '+esc(x.note):'')+'. Nhận đồ hỏng, kiểm số rồi xác nhận: kệ xưởng sẽ trừ và chuyển sang hàng hư chưa gửi thợ.</div>' : '<div class="small">'+esc(x.by)+' gom <b>'+esc(x.partName)+'</b>'+(x.kartLabel?' tháo từ '+esc(x.kartLabel):'')+'. Kiểm số đồ thực nhận rồi xác nhận.</div>')+'<div class="f"><label for="pQty">Số thực nhận</label><input id="pQty" type="number" min="0" step="1" value="'+x.qty+'"></div>'
     : '<div class="small">Thợ '+esc(x.by)+' kiểm tra <b>'+esc(x.partName)+'</b>.'+(x.note?' Ghi chú: '+esc(x.note):'')+'</div><div class="f2"><div class="f"><label for="pOk">Sửa được (về kệ xưởng)</label><input id="pOk" type="number" min="0" step="1" value="'+x.ok+'"></div><div class="f"><label for="pBad">Hỏng hẳn (hủy)</label><input id="pBad" type="number" min="0" step="1" value="'+x.bad+'"></div></div>';
   modal("Xác nhận", body+nameField("fBy","Người xác nhận"), '<button class="btn pri" type="button" data-a="pdOkGo" data-id="'+esc(x.id)+'">Xác nhận</button>');
 };
@@ -894,13 +933,13 @@ A.part = d=>{
   const p=S.parts.get(d.id); if(!p) return; const st=stockMap(); const s=st[p.id]||{tong:0,moi:0,sua:0,cho:0,xuong:0};
   const mv=S.moves.filter(m=>m.partId===p.id).slice(0,30);
   let body='<div class="tiles">'+(S.isTruong?'<div class="tile t-info"><span class="k">Kho tổng</span><span class="v num">'+s.tong+'</span><span class="d">ngưỡng '+(+p.threshTong||0)+'</span></div>':'')
-    +'<div class="tile t-ok"><span class="k">Kệ xưởng – mới</span><span class="v num">'+s.moi+'</span></div><div class="tile t-ok"><span class="k">Kệ xưởng – đã sửa</span><span class="v num">'+s.sua+'</span><span class="d">dùng trước</span></div><div class="tile t-warn"><span class="k">Hư chờ kiểm tra</span><span class="v num">'+s.cho+'</span></div></div>';
+    +'<div class="tile t-ok"><span class="k">Kệ xưởng – mới</span><span class="v num">'+s.moi+'</span></div><div class="tile t-ok"><span class="k">Kệ xưởng – đã sửa</span><span class="v num">'+s.sua+'</span><span class="d">dùng trước</span></div><div class="tile t-warn"><span class="k">Hư chưa gửi thợ</span><span class="v num">'+s.cho+'</span></div><div class="tile t-info"><span class="k">Đang ở chỗ thợ</span><span class="v num">'+(s.gui||0)+'</span></div></div>';
   body+='<div class="small muted">'+esc(p.group||"")+' · Ngưỡng kệ xưởng '+(+p.threshold||0)+(p.base&&p.base.at?' · Số chốt '+fmtD(p.base.at):'')+'</div>';
   const pend=pendingOf(p.id); if(pend.length) body+='<div class="banner small">'+pend.length+' việc đang chờ trưởng bộ phận xác nhận.</div>';
-  body+='<div class="inline"><button class="btn sm pri" type="button" data-a="hong" data-part="'+esc(p.id)+'">Báo hỏng</button><button class="btn sm" type="button" data-a="mv" data-k="gom_sua" data-part="'+esc(p.id)+'">Gom đồ hư tháo từ xe</button>'+(s.cho&&S.isTruong?'<button class="btn sm" type="button" data-a="ktra" data-part="'+esc(p.id)+'">Ghi kết quả kiểm tra</button>':'')+'<button class="btn sm" type="button" data-a="mv" data-k="huy" data-part="'+esc(p.id)+'">Hủy hàng lỗi</button>'
+  body+='<div class="inline"><button class="btn sm pri" type="button" data-a="hong" data-part="'+esc(p.id)+'">Báo hỏng</button><button class="btn sm" type="button" data-a="mv" data-k="gom_sua" data-part="'+esc(p.id)+'">Gom đồ hư tháo từ xe</button>'+(s.cho&&S.isTruong?'<button class="btn sm" type="button" data-a="gui" data-part="'+esc(p.id)+'">Gửi thợ sửa</button>':'')+((s.cho||s.gui)&&S.isTruong?'<button class="btn sm" type="button" data-a="ktra" data-part="'+esc(p.id)+'">Ghi kết quả sửa</button>':'')+'<button class="btn sm" type="button" data-a="mv" data-k="huy" data-part="'+esc(p.id)+'">Hủy hàng lỗi</button>'
     +(S.isTruong?'<button class="btn sm" type="button" data-a="mv" data-k="cap" data-part="'+esc(p.id)+'">Cấp xuống</button><button class="btn sm" type="button" data-a="mv" data-k="dieu_chinh" data-loc="xuong" data-part="'+esc(p.id)+'">Kiểm kê xưởng</button>':'')
     +(S.isEditor?'<button class="btn sm" type="button" data-a="pnNew" data-part="'+esc(p.id)+'">Lập phiếu nhập</button><button class="btn sm" type="button" data-a="mv" data-k="dieu_chinh" data-loc="tong" data-part="'+esc(p.id)+'">Kiểm kê kho tổng</button><button class="btn sm" type="button" data-a="editPart" data-id="'+esc(p.id)+'">Sửa thông tin</button>':'')+'</div>';
-  const locName={tong:"kho tổng",moi:"xưởng mới",sua:"xưởng đã sửa",cho:"hư chờ KT"};
+  const locName={tong:"kho tổng",moi:"xưởng mới",sua:"xưởng đã sửa",cho:"hư chưa gửi thợ",gui:"ở chỗ thợ"};
   body+='<b>Giao dịch gần đây</b>'+(mv.length?'<div class="list">'+mv.map(m=>'<div class="row"><div class="main"><span class="t">'+esc(mvLabel(m))+(m.loc?' ('+locName[m.loc]+')':'')+(m.kind==="xuat"&&m.src==="sua"?' (hàng đã sửa)':'')+' '+(m.kind==="dieu_chinh"&&m.qty>0?"+":"")+esc(m.qty)+'</span><span class="m">'+fmtT(m.at)+' · '+esc(m.by||"")+(m.kartId?' · '+esc(kartLabel(kartById(m.kartId))):'')+(m.note?' · '+esc(m.note):'')+'</span></div></div>').join("")+'</div>':'<div class="small muted">Chưa có giao dịch kể từ lần chốt sổ.</div>');
   modal(p.name, body);
 };
@@ -1140,12 +1179,13 @@ A.dcLoad = async ()=>{
   render();
 };
 A.dcExport = async (d,btn)=>{
-  const R=S.ui.dc; if(!R||!R.rows) return; const {T1,T2,T3,T4}=dcTables(R.rows);
+  const R=S.ui.dc; if(!R||!R.rows) return; const {T1,T2,T3,T4,T5}=dcTables(R.rows);
   const mk=(heads,T)=>[["Nhóm","Vật tư"].concat(heads)].concat(T.filter(x=>x.act).map(x=>[x.r.group,x.r.name].concat(x.cells)));
   const tables=[
     {name:"1. Kệ xưởng", rows:mk(["Đầu kỳ","Cấp xuống","Thay cho xe","Báo hỏng","Sửa được về kệ","Hủy tại kệ","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T1)},
     {name:"2. Đồ cũ thu về", rows:mk(["Thay cho xe","Gom về (đã xác nhận)","Báo bỏ","Chưa rõ"],T2)},
-    {name:"3. Hàng hư chờ KT", rows:mk(["Đầu kỳ","Gom vào + báo hỏng","Sửa được","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3)},
+    {name:"3. Hư chưa gửi thợ", rows:mk(["Đầu kỳ","Gom vào + báo hỏng","Gửi thợ","Sửa được (tại xưởng)","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3)},
+    {name:"5. Đang ở chỗ thợ", rows:mk(["Đầu kỳ","Gửi đi","Sửa được trả về","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T5)},
     {name:"4. Kho tổng", rows:mk(["Đầu kỳ","Nhập mua","Cấp xuống","Hủy","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T4)}];
   return xuatNut(btn, "Xuất đối chiếu ra Excel", "Đối chiếu Gokart "+fmtD(R.from)+" - "+fmtD(R.to-1), tables);
 };

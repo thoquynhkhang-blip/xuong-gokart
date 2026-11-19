@@ -2,7 +2,7 @@
 -- d = thời gian (mili-giây), b = 0/1, a = danh sách JSON
 CREATE TABLE IF NOT EXISTS Xe (id TEXT PRIMARY KEY, "type" TEXT, num TEXT, active INTEGER, createdAt INTEGER, lastMaintAt INTEGER, lastMaintBy TEXT);
 CREATE TABLE IF NOT EXISTS PhuTung (id TEXT PRIMARY KEY, "group" TEXT, name TEXT, unit TEXT, threshold REAL, repairable INTEGER, active INTEGER,
-  baseTot REAL, baseCho REAL, baseAt INTEGER, createdAt INTEGER, threshTong REAL, baseTong REAL, baseSua REAL);
+  baseTot REAL, baseCho REAL, baseAt INTEGER, createdAt INTEGER, threshTong REAL, baseTong REAL, baseSua REAL, baseGui REAL);
 CREATE TABLE IF NOT EXISTS PhieuSua (id TEXT PRIMARY KEY, kartId TEXT, kartLabel TEXT, cat TEXT, issue TEXT, blocking INTEGER, reporter TEXT, status TEXT,
   createdAt INTEGER, startedAt INTEGER, doneAt INTEGER, fixer TEXT, waitNote TEXT, waitAt INTEGER, result TEXT, cancelBy TEXT);
 CREATE INDEX IF NOT EXISTS ps_status ON PhieuSua(status);

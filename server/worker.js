@@ -9,7 +9,7 @@
 const SCHEMA = {
   Xe: { id: "s", type: "s", num: "s", active: "b", createdAt: "d", lastMaintAt: "d", lastMaintBy: "s" },
   PhuTung: { id: "s", group: "s", name: "s", unit: "s", threshold: "n", repairable: "b", active: "b", baseTot: "n", baseCho: "n",
-    baseAt: "d", createdAt: "d", threshTong: "n", baseTong: "n", baseSua: "n" },
+    baseAt: "d", createdAt: "d", threshTong: "n", baseTong: "n", baseSua: "n", baseGui: "n" },
   PhieuSua: { id: "s", kartId: "s", kartLabel: "s", cat: "s", issue: "s", blocking: "b", reporter: "s", status: "s", createdAt: "d",
     startedAt: "d", doneAt: "d", fixer: "s", waitNote: "s", waitAt: "d", result: "s", cancelBy: "s" },
   GiaoDich: { id: "s", at: "d", kind: "s", partId: "s", partName: "s", qty: "n", kartId: "s", kartLabel: "s", ticketId: "s", from: "s",
@@ -21,7 +21,7 @@ const SCHEMA = {
   PhieuNhap: { id: "s", ngay: "d", createdAt: "d", ncc: "s", soHD: "s", kiemBy: "s", by: "s", note: "s", soDong: "n", tongSL: "n", tongTien: "n",
     chiTiet: "s", anh: "a", status: "s", huyBy: "s", huyAt: "d", lyDoHuy: "s" }
 };
-const PHIEN_BAN = "cf-2026-11-19.2";
+const PHIEN_BAN = "cf-2026-11-19.3";
 const OPEN = ["cho", "dang", "doi"];
 const TYPES = { don: "Đơn", doi: "Đôi" };
 const q_ = c => '"' + c + '"';
@@ -147,12 +147,13 @@ function applyMove_(a, m) {
     case "cap": a.tong -= q; a.moi += q; break;
     case "xuat": if (m.src === "sua") a.sua -= q; else a.moi -= q; break;
     case "gom_sua": a.cho += q; if (m.src === "moi" || m.src === "sua") a[m.src] -= q; break;
-    case "nhap_sau_sua": a.cho -= q; a.sua += q; break;
+    case "nhap_sau_sua": if (m.loc === "gui") a.gui -= q; else a.cho -= q; a.sua += q; break;
+    case "gui_sua": a.cho -= q; a.gui += q; break;
     case "huy": { const l = m.loc || (m.from === "tot" ? "moi" : "cho"); a[l] -= q; break; }
     case "dieu_chinh": { const l = m.loc || "moi"; a[l] += q; break; }
   }
 }
-function base_(p) { return { tong: p.baseTong || 0, moi: p.baseTot || 0, sua: p.baseSua || 0, cho: p.baseCho || 0, at: p.baseAt || 0 }; }
+function base_(p) { return { tong: p.baseTong || 0, moi: p.baseTot || 0, sua: p.baseSua || 0, cho: p.baseCho || 0, gui: p.baseGui || 0, at: p.baseAt || 0 }; }
 function balances_(parts, moves, T) {
   const st = {};
   parts.forEach(p => st[p.id] = base_(p));
@@ -176,7 +177,7 @@ const API = {
       role: role, ver: key,
       config: { closingAt: Number(c.closingAt) || 0, maintDays: c.maintDays || 7, dailyItems: c.dailyItems || null, maintItems: c.maintItems || null, appUrl: "" },
       karts: S.karts,
-      parts: S.parts.map(p => Object.assign({}, p, { base: { tong: p.baseTong, moi: p.baseTot, sua: p.baseSua, cho: p.baseCho, at: p.baseAt } })),
+      parts: S.parts.map(p => Object.assign({}, p, { base: { tong: p.baseTong, moi: p.baseTot, sua: p.baseSua, cho: p.baseCho, gui: p.baseGui || 0, at: p.baseAt } })),
       tOpen: S.tickets.filter(t => OPEN.includes(t.status)),
       tRecent: S.tickets.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 300),
       moves: S.moves.slice().sort(byAtDesc),
@@ -236,8 +237,9 @@ const API = {
     if (ok < 0 || bad < 0 || ok + bad <= 0 || Math.floor(ok) !== ok || Math.floor(bad) !== bad) throw err("Số lượng không hợp lệ.");
     if (role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý ghi kết quả kiểm tra hàng hư.");
     const list = [];
-    if (ok) list.push({ kind: "nhap_sau_sua", partId: k.partId, qty: ok, by: k.by, note: k.note || "Thợ kiểm tra: sửa được" });
-    if (bad) list.push({ kind: "huy", loc: "cho", partId: k.partId, qty: bad, by: k.by, note: k.note || "Thợ kiểm tra: không sửa được" });
+    const tuGui = k.from === "gui";
+    if (ok) list.push({ kind: "nhap_sau_sua", loc: tuGui ? "gui" : "", partId: k.partId, qty: ok, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: sửa được" : "Thợ kiểm tra: sửa được") });
+    if (bad) list.push({ kind: "huy", loc: tuGui ? "gui" : "cho", partId: k.partId, qty: bad, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: hỏng hẳn" : "Thợ kiểm tra: không sửa được") });
     return addMoves_(ctx, role, list);
   },
 
@@ -250,12 +252,16 @@ const API = {
     const now = Date.now(); const rows = [];
     const base = { partId: x.partId, partName: x.partName, kartId: x.kartId, kartLabel: x.kartLabel, ticketId: x.ticketId, from: "", src: "", old: "", by: x.by };
     const tuKe = x.type === "gom" && (x.src === "moi" || x.src === "sua") ? x.src : "";
+    const keChung = x.type === "gom" && x.src === "ke";
     const tag = " (xác nhận: " + who + ")";
     let patch;
     if (x.type === "gom") {
       const q = fix && fix.qty !== undefined ? Number(fix.qty) : x.qty;
       if (!(q >= 0) || Math.floor(q) !== q) throw err("Số lượng không hợp lệ.");
-      if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", src: tuKe, note: (x.note || "Gom hàng hư") + tag }));
+      if (q > 0 && keChung) {
+        const S = await snap(ctx.db); const ton = balances_(S.parts, S.moves, Infinity)[x.partId] || {};
+        tachKe_(q, ton, x.partName).forEach((t, i) => rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now + i, kind: "gom_sua", qty: t.q, loc: "", src: t.src, note: (x.note || "Báo hỏng") + tag })));
+      } else if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", src: tuKe, note: (x.note || "Gom hàng hư") + tag }));
       patch = { status: "duyet", duyetBy: who, duyetAt: now, qty: q };
     } else {
       const ok = fix && fix.ok !== undefined ? Number(fix.ok) : x.ok, bad = fix && fix.bad !== undefined ? Number(fix.bad) : x.bad;
@@ -347,11 +353,12 @@ const API = {
     const S = await snap(ctx.db);
     const exist = {}; S.parts.forEach(p => exist[p.id] = p);
     const now = Date.now(); const add = []; let upd = 0; const seen = {};
+    const stI = balances_(S.parts, S.moves, now);
     (rows || []).forEach(r => {
       const id = slug_(r.group + "-" + r.name);
       const data = { group: str_(r.group, 80) || "Khác", name: str_(r.name, 120), unit: str_(r.unit, 20) || "Cái", threshold: Number(r.threshold) || 0,
         threshTong: Number(r.threshTong) || 0, repairable: false, active: true, baseTong: Number(r.tong) || 0, baseTot: Number(r.tot) || 0,
-        baseSua: Number(r.sua) || 0, baseCho: Number(r.cho) || 0, baseAt: now };
+        baseSua: Number(r.sua) || 0, baseCho: Number(r.cho) || 0, baseGui: (stI[id] || {}).gui || 0, baseAt: now };
       if (!data.name || seen[id]) return; seen[id] = 1;
       if (exist[id]) { ctx.db.update("PhuTung", id, data); upd++; }
       else add.push(Object.assign({ id: id, createdAt: now }, data));
@@ -372,7 +379,7 @@ const API = {
     const S = await snap(ctx.db);
     const T = Date.now();
     const st = balances_(S.parts, S.moves, T);
-    S.parts.forEach(p => { const a = st[p.id]; ctx.db.update("PhuTung", p.id, { baseTong: a.tong, baseTot: a.moi, baseSua: a.sua, baseCho: a.cho, baseAt: T }); });
+    S.parts.forEach(p => { const a = st[p.id]; ctx.db.update("PhuTung", p.id, { baseTong: a.tong, baseTot: a.moi, baseSua: a.sua, baseCho: a.cho, baseGui: a.gui || 0, baseAt: T }); });
     ctx.db.setConfig({ closingAt: T });
     await ctx.db.commit();
     return S.parts.length;
@@ -399,7 +406,7 @@ const API = {
     const parts = S.parts.filter(p => p.active);
     const s0 = balances_(parts, S.moves, from - 1), s1 = balances_(parts, S.moves, to - 1);
     const inPeriod = await ctx.db.rows("GiaoDich", "at>=? AND at<?", from, to);
-    const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, hong: 0, bo: 0, suaDuoc: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
+    const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, hong: 0, bo: 0, suaDuoc: 0, suaCho: 0, suaGui: 0, guiDi: 0, huyGui: 0, dcGui: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
     const agg = {}; parts.forEach(p => agg[p.id] = z());
     inPeriod.forEach(m => {
       const a = agg[m.partId]; if (!a) return;
@@ -408,7 +415,8 @@ const API = {
       else if (m.kind === "cap") a.cap += q;
       else if (m.kind === "xuat") { if (m.src === "sua") a.xuatSua += q; else a.xuatMoi += q; if (m.old === "bo") a.bo += q; }
       else if (m.kind === "gom_sua") { if (m.src === "moi" || m.src === "sua") a.hong += q; else a.gom += q; }
-      else if (m.kind === "nhap_sau_sua") a.suaDuoc += q;
+      else if (m.kind === "nhap_sau_sua") { a.suaDuoc += q; if (m.loc === "gui") a.suaGui += q; else a.suaCho += q; }
+      else if (m.kind === "gui_sua") a.guiDi += q;
       else if (m.kind === "huy") a["huy" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
       else if (m.kind === "dieu_chinh") a["dc" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
     });
@@ -495,15 +503,24 @@ const API = {
 
 function phieu_(p) { const o = Object.assign({}, p); try { o.items = JSON.parse(o.chiTiet || "[]"); } catch (e) { o.items = []; } delete o.chiTiet; return o; }
 
-const KINDS = ["nhap", "cap", "xuat", "gom_sua", "nhap_sau_sua", "huy", "dieu_chinh"];
-const LOCS = ["tong", "moi", "sua", "cho"];
+const KINDS = ["nhap", "cap", "xuat", "gom_sua", "nhap_sau_sua", "huy", "dieu_chinh", "gui_sua"];
+const LOCS = ["tong", "moi", "sua", "cho", "gui"];
+function tachKe_(q, ton, name) {
+  const sua = Math.max(0, ton.sua || 0), moi = Math.max(0, ton.moi || 0);
+  if (q > sua + moi) throw err(name + ": kệ xưởng chỉ còn " + (sua + moi) + ", không báo hỏng " + q + " được.");
+  const out = []; const a = Math.min(q, sua);
+  if (a > 0) out.push({ src: "sua", q: a });
+  if (q - a > 0) out.push({ src: "moi", q: q - a });
+  return out;
+}
 async function addMoves_(ctx, role, list) {
   const S = await snap(ctx.db);
   const karts = S.karts, parts = S.parts;
   const now = Date.now();
   if (!Array.isArray(list) || !list.length) throw err("Chưa có dòng nào.");
   let bal = null;
-  const rows = list.map((m, i) => {
+  const rows = [];
+  list.forEach((m, i) => {
     const kind = str_(m.kind, 20);
     if (!KINDS.includes(kind)) throw err("Loại giao dịch không hợp lệ.");
     const loc = LOCS.includes(m.loc) ? m.loc : (kind === "huy" ? "cho" : "");
@@ -513,22 +530,35 @@ async function addMoves_(ctx, role, list) {
     if (kind === "dieu_chinh" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý mới kiểm kê.");
     if (kind === "huy" && loc === "tong" && role === "staff") throw err("Nhân viên không hủy hàng kho tổng.");
     if (kind === "dieu_chinh" && !loc) throw err("Thiếu vị trí kiểm kê.");
-    if (role === "staff" && (kind === "nhap_sau_sua" || (kind === "huy" && loc === "cho"))) throw err("Kết quả kiểm tra hàng hư phải gửi qua mục Thợ kiểm tra để trưởng bộ phận xác nhận.");
+    if (kind === "gui_sua" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý ghi gửi thợ sửa.");
+    if (role === "staff" && (kind === "nhap_sau_sua" || (kind === "huy" && (loc === "cho" || loc === "gui")))) throw err("Kết quả kiểm tra hàng hư phải gửi qua mục Thợ kiểm tra để trưởng bộ phận xác nhận.");
     const qty = Number(m.qty);
     if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0)) throw err("Số lượng không hợp lệ.");
     const part = parts.find(p => p.id === m.partId);
     if (!part) throw err("Phụ tùng không tồn tại.");
+    const ton = (bal || (bal = balances_(parts, S.moves, Infinity)))[part.id] || {};
+    if (kind === "gui_sua" && qty > (ton.cho || 0)) throw err(part.name + ": chỉ còn " + (ton.cho || 0) + " cái hư chưa gửi thợ.");
+    if ((kind === "nhap_sau_sua" || kind === "huy") && loc === "gui" && qty > (ton.gui || 0)) throw err(part.name + ": thợ đang giữ " + (ton.gui || 0) + " cái, không ghi " + qty + " được.");
+    const tho = kind === "gui_sua" ? str_(m.tho, 60).trim() : "";
+    if (kind === "gui_sua" && !tho) throw err("Ghi tên thợ hoặc nơi nhận sửa.");
     if (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) {
-      const ton = (bal || (bal = balances_(parts, S.moves, Infinity)))[part.id] || {};
       if (qty > (ton[m.src] || 0)) throw err(part.name + ": kệ xưởng chỉ còn " + (ton[m.src] || 0) + " " + (m.src === "sua" ? "hàng đã sửa" : "hàng mới") + ", không báo hỏng " + qty + " được.");
     }
-    return {
-      id: "G" + uid_(), at: now + i, kind: kind, partId: m.partId, partName: part.name, qty: qty,
+    const r = {
+      id: "G" + uid_(), at: now + rows.length, kind: kind, partId: m.partId, partName: part.name, qty: qty,
       kartId: str_(m.kartId, 40), kartLabel: m.kartId ? kartLabel_(m.kartId, karts) : "", ticketId: str_(m.ticketId, 40),
-      from: "", by: name_(m.by), note: str_(m.note),
-      src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) ? m.src : "", loc: (kind === "huy" || kind === "dieu_chinh") ? loc : "",
+      from: tho, by: name_(m.by), note: str_(m.note),
+      src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : (kind === "gom_sua" && (m.src === "moi" || m.src === "sua" || m.src === "ke")) ? m.src : "",
+      loc: (kind === "huy" || kind === "dieu_chinh") ? loc : (kind === "nhap_sau_sua" && loc === "gui") ? "gui" : "",
       old: kind === "xuat" ? (m.old === "bo" ? "bo" : m.old === "gom" ? "gom" : "") : ""
     };
+    if (kind === "gom_sua" && r.src === "ke") {
+      const parts2 = tachKe_(qty, ton, part.name);
+      if (role === "staff") { rows.push(r); return; }
+      parts2.forEach(t => rows.push(Object.assign({}, r, { id: "G" + uid_(), at: now + rows.length, qty: t.q, src: t.src })));
+      return;
+    }
+    rows.push(r);
   });
   const pend = [], direct = [];
   rows.forEach(r => { if (r.kind === "gom_sua" && role === "staff") pend.push(r); else direct.push(r); });
@@ -583,7 +613,7 @@ async function napKiemKe_(ctx, mode, by, allowTong, list) {
       added++; return;
     }
     let o = Object.assign({}, info);
-    if (mode === "dat") o = Object.assign(o, { baseTong: x.tong || 0, baseTot: x.moi || 0, baseSua: x.sua || 0, baseCho: x.cho || 0, baseAt: now });
+    if (mode === "dat") o = Object.assign(o, { baseTong: x.tong || 0, baseTot: x.moi || 0, baseSua: x.sua || 0, baseCho: x.cho || 0, baseGui: (st[id] || {}).gui || 0, baseAt: now });
     else {
       const cur = st[id];
       [["tong", "tong"], ["moi", "moi"], ["sua", "sua"], ["cho", "cho"]].forEach(([k, loc]) => {
