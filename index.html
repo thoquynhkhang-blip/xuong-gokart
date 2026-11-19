@@ -639,6 +639,7 @@ function drawQRs(){ if(!window.QRCode) return; document.querySelectorAll(".qrc")
 function modal(title, body, foot){
   OP_ID=newOp();
   $("#modalRoot").innerHTML='<div class="veil" id="veil"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mTitle"><div class="sheet-h"><h3 id="mTitle">'+esc(title)+'</h3><button class="x" type="button" data-a="close" aria-label="Đóng">×</button></div><div class="sheet-b" id="mBody">'+body+'</div>'+(foot?'<div class="sheet-f">'+foot+'</div>':'')+'</div></div>';
+  $("#mBody").querySelectorAll("select[data-grp-for]").forEach(g=>{ if(g.value) locNhom(g,false); });
   const f=$("#mBody").querySelector("input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea"); if(f && !("ontouchstart" in window)) f.focus();
 }
 function closeModal(){ $("#modalRoot").innerHTML=""; const r=route(); if(r.startsWith("xe-")){ history.replaceState(null,"","#xe"); openedHash=null; render(); } }
@@ -658,6 +659,28 @@ function partSelect(id, sel, filterFn, where){
     h+='<option value="'+esc(p.id)+'" '+(p.id===sel?"selected":"")+'>'+esc(p.name)+' – '+lab+'</option>'; }
   return h+(g!==null?'</optgroup>':'')+'</select>';
 }
+
+/* chọn nhóm trước, rồi chọn vật tư trong nhóm */
+function partPicker(id, label, sel, filterFn, where){
+  const ps=sortedParts().filter(filterFn||(()=>true)); const gs=[...new Set(ps.map(p=>p.group||"Khác"))];
+  const cur=sel? ((S.parts.get(sel)||{}).group||"Khác") : "";
+  let h='';
+  if(gs.length>1) h+='<div class="f"><label for="'+id+'Grp">Nhóm vật tư</label><select id="'+id+'Grp" data-grp-for="'+id+'"><option value="">Tất cả nhóm ('+ps.length+')</option>'
+    +gs.map(g=>'<option value="'+esc(g)+'" '+(g===cur?"selected":"")+'>'+esc(g)+' ('+ps.filter(p=>(p.group||"Khác")===g).length+')</option>').join("")+'</select></div>';
+  return h+'<div class="f"><label for="'+id+'">'+label+'</label>'+partSelect(id, sel, filterFn, where)+'</div>';
+}
+function locNhom(gsel, chon){
+  const el=$("#"+gsel.dataset.grpFor); if(!el) return;
+  if(!el.dataset.full) el.dataset.full=el.innerHTML;
+  const g=gsel.value, t=document.createElement("select"); t.innerHTML=el.dataset.full;
+  const old=el.value;
+  if(!g){ el.innerHTML=el.dataset.full; }
+  else { const og=[...t.querySelectorAll("optgroup")].find(x=>x.label===g); el.innerHTML=t.options[0].outerHTML+(og?og.outerHTML:""); }
+  const vals=[...el.options].map(o=>o.value).filter(Boolean);
+  if(vals.includes(old)) el.value=old; else el.value = (chon && vals.length===1) ? vals[0] : "";
+  if(el.value!==old) el.dispatchEvent(new Event("change",{bubbles:true}));
+}
+document.addEventListener("change",e=>{ const t=e.target; if(t&&t.matches&&t.matches("select[data-grp-for]")) locNhom(t,true); });
 function val(id){ const e=$("#"+id); return e? e.value.trim() : ""; }
 function num(id){ const n=Number(val(id)); return isFinite(n)?n:NaN; }
 
@@ -731,7 +754,7 @@ A.useParts = d=>{
   modal("Thay / xuất phụ tùng cho xe",
     (tk?'<div class="small muted">Gắn với phiếu: '+esc(kartLabel(kartById(tk.kartId)))+' · '+esc(tk.issue||"")+'</div>':'')
    +'<div class="f"><label for="fKart">Xe được thay</label>'+kartSelect("fKart", d.kart||"", true)+'</div>'
-   +'<div class="f"><label for="fPart">Phụ tùng lấy từ kệ xưởng</label>'+partSelect("fPart","")+'</div>'
+   +partPicker("fPart", "Phụ tùng lấy từ kệ xưởng", "")
    +'<div class="f" id="srcBox"></div>'
    +'<div class="f"><label for="fQty">Số lượng</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
    +'<div class="f"><span class="lb">Đồ cũ tháo ra</span><div class="opts"><label class="opt"><input type="radio" name="fOld" value="gom" checked> Gom lại chờ thợ kiểm tra (không chắc thì chọn mục này)</label><label class="opt"><input type="radio" name="fOld" value="bo"> Bỏ hẳn (cháy, bể nát) – ghi lý do</label></div></div>'
@@ -758,7 +781,7 @@ A.mv = d=>{
   const k=d.k; const st=stockMap();
   const titles={nhap:"Nhập mua vào kho tổng", cap:"Cấp từ kho tổng xuống kệ xưởng", gom_sua:"Gom hàng hư chờ kiểm tra", huy:"Hủy hàng", dieu_chinh:"Kiểm kê, điều chỉnh"};
   let where = k==="nhap"||k==="cap"||(d.loc==="tong") ? "tong" : "xuong";
-  let body='<div class="f"><label for="fPart">Phụ tùng</label>'+partSelect("fPart", d.part||"", null, where)+'</div>';
+  let body=partPicker("fPart", "Phụ tùng", d.part||"", null, where);
   if(k==="dieu_chinh"){
     const locs = d.loc==="tong" ? [["tong","Kho tổng"]] : [["moi","Kệ xưởng – hàng mới"],["sua","Kệ xưởng – hàng đã sửa"],["cho","Hàng hư chờ kiểm tra"]];
     body+='<div class="f"><label for="fLoc">Vị trí đếm</label><select id="fLoc">'+locs.map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join("")+'</select></div>';
@@ -794,7 +817,7 @@ A.hong = d=>{
   const st=stockMap(); const coKe=p=>((st[p.id]||{}).xuong||0)>0 || p.id===d.part;
   if(!sortedParts().some(coKe)){ toast("Kệ xưởng chưa có vật tư nào.","bad"); return; }
   modal("Báo vật tư hỏng",
-    '<div class="f"><label for="fPart">Vật tư hỏng</label>'+partSelect("fPart", d.part||"", coKe, "xuong")+'</div>'
+    partPicker("fPart", "Vật tư hỏng", d.part||"", coKe, "xuong")
    +'<div class="f"><label for="fQty">Số lượng hỏng</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
    +'<div class="f"><label for="fNote">Hỏng thế nào?</label><input id="fNote" type="text" placeholder="Ví dụ: pin không giữ điện, sạc không lên đèn"></div>'
    +nameField("fBy","Người báo")
@@ -819,7 +842,7 @@ A.gui = d=>{
   const st=stockMap(); const co=p=>((st[p.id]||{}).cho||0)>0;
   if(!sortedParts().some(co)){ toast("Không có hàng hư nào chưa gửi thợ.","ok",5000); return; }
   modal("Gửi thợ sửa",
-    '<div class="f"><label for="fPart">Vật tư gửi sửa</label>'+partSelect("fPart", d.part||"", co, "cho")+'</div>'
+    partPicker("fPart", "Vật tư gửi sửa", d.part||"", co, "cho")
    +'<div class="f"><label for="fQty">Số lượng gửi</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
    +'<div class="f"><label for="fTho">Gửi cho thợ / tiệm nào?</label><input id="fTho" type="text" placeholder="Ví dụ: Anh Tuấn, tiệm điện Hòa Phát"></div>'
    +'<div class="f"><label for="fNote">Ghi chú (không bắt buộc)</label><input id="fNote" type="text" placeholder="Ví dụ: hẹn 3 ngày lấy"></div>'
@@ -891,7 +914,7 @@ A.ktra = d=>{
   if(!sortedParts().some(co)){ toast("Không có hàng hư nào chưa gửi thợ hay đang ở chỗ thợ.","ok",5000); return; }
   modal("Ghi kết quả sửa",
     '<div class="small muted">Ghi số cái sửa được (về kệ xưởng, dùng trước hàng mới) và số cái hỏng hẳn (hủy).</div>'
-   +'<div class="f"><label for="fPart">Vật tư</label>'+partSelect("fPart", d.part||"", co, "cho")+'</div>'
+   +partPicker("fPart", "Vật tư", d.part||"", co, "cho")
    +'<div class="f"><span class="lb">Hàng ở đâu?</span><div class="opts" id="fFromBox"></div></div>'
    +'<div class="f2"><div class="f"><label for="fOk">Sửa được</label><input id="fOk" type="number" inputmode="numeric" min="0" step="1" value="0"></div><div class="f"><label for="fBad">Hỏng hẳn, hủy</label><input id="fBad" type="number" inputmode="numeric" min="0" step="1" value="0"></div></div>'
    +'<div class="f"><label for="fTho">Thợ sửa (không bắt buộc)</label><input id="fTho" type="text" placeholder="Tên thợ hoặc tiệm sửa"></div>'
