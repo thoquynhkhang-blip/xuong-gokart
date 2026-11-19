@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS Checklist (id TEXT PRIMARY KEY, date TEXT, at INTEGER
 CREATE INDEX IF NOT EXISTS ck_date ON Checklist(date);
 CREATE TABLE IF NOT EXISTS BaoTri (id TEXT PRIMARY KEY, at INTEGER, kartId TEXT, kartLabel TEXT, items TEXT, "by" TEXT, note TEXT);
 CREATE TABLE IF NOT EXISTS XacNhan (id TEXT PRIMARY KEY, at INTEGER, "type" TEXT, partId TEXT, partName TEXT, qty REAL, ok REAL, bad REAL, kartId TEXT,
-  kartLabel TEXT, ticketId TEXT, "by" TEXT, note TEXT, status TEXT, duyetBy TEXT, duyetAt INTEGER, lyDo TEXT);
+  kartLabel TEXT, ticketId TEXT, "by" TEXT, note TEXT, status TEXT, duyetBy TEXT, duyetAt INTEGER, lyDo TEXT, src TEXT);
 CREATE INDEX IF NOT EXISTS xn_status ON XacNhan(status);
 CREATE TABLE IF NOT EXISTS PhieuNhap (id TEXT PRIMARY KEY, ngay INTEGER, createdAt INTEGER, ncc TEXT, soHD TEXT, kiemBy TEXT, "by" TEXT, note TEXT,
   soDong REAL, tongSL REAL, tongTien REAL, chiTiet TEXT, anh TEXT, status TEXT, huyBy TEXT, huyAt INTEGER, lyDoHuy TEXT);

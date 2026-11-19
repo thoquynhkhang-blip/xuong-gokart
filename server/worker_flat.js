@@ -1,10 +1,3 @@
-/**
-* XƯỞNG GOKART — PUPPY FARM · máy chủ trên Cloudflare Workers + D1
-* Giao diện (GitHub Pages) gửi POST {fn, args, op} và nhận JSON {ok, data} hoặc {ok:false, error}.
-* Logic nghiệp vụ chép từ bản Google Apps Script cũ, chỉ thay chỗ lưu dữ liệu (Google Sheet → D1).
-*/
-/* ---------------- cấu trúc bảng ---------------- */
-// t: s=chuỗi, n=số, d=thời gian (ms), b=đúng/sai, a=danh sách (JSON)
 const SCHEMA = {
 Xe: { id: "s", type: "s", num: "s", active: "b", createdAt: "d", lastMaintAt: "d", lastMaintBy: "s" },
 PhuTung: { id: "s", group: "s", name: "s", unit: "s", threshold: "n", repairable: "b", active: "b", baseTot: "n", baseCho: "n",
@@ -16,17 +9,16 @@ by: "s", note: "s", src: "s", loc: "s", old: "s" },
 Checklist: { id: "s", date: "s", at: "d", by: "s", items: "a", note: "s" },
 BaoTri: { id: "s", at: "d", kartId: "s", kartLabel: "s", items: "a", by: "s", note: "s" },
 XacNhan: { id: "s", at: "d", type: "s", partId: "s", partName: "s", qty: "n", ok: "n", bad: "n", kartId: "s", kartLabel: "s", ticketId: "s",
-by: "s", note: "s", status: "s", duyetBy: "s", duyetAt: "d", lyDo: "s" },
+by: "s", note: "s", status: "s", duyetBy: "s", duyetAt: "d", lyDo: "s", src: "s" },
 PhieuNhap: { id: "s", ngay: "d", createdAt: "d", ncc: "s", soHD: "s", kiemBy: "s", by: "s", note: "s", soDong: "n", tongSL: "n", tongTien: "n",
 chiTiet: "s", anh: "a", status: "s", huyBy: "s", huyAt: "d", lyDoHuy: "s" }
 };
-const PHIEN_BAN = "cf-2026-11-19.1";
+const PHIEN_BAN = "cf-2026-11-19.2";
 const OPEN = ["cho", "dang", "doi"];
 const TYPES = { don: "Đơn", doi: "Đôi" };
 const q_ = c => '"' + c + '"';
 class Loi extends Error {}
 function err(msg) { return new Loi(msg); }
-/* ---------------- đọc / ghi D1 ---------------- */
 function fromDb(name, row) {
 const s = SCHEMA[name], o = {};
 for (const k in s) {
@@ -50,7 +42,6 @@ constructor(env) { this.d = env.DB; this.w = []; }
 async all(sql, ...b) { return (await this.d.prepare(sql).bind(...b).all()).results || []; }
 async first(sql, ...b) { return await this.d.prepare(sql).bind(...b).first(); }
 async rows(name, where, ...b) { return (await this.all("SELECT * FROM " + name + (where ? " WHERE " + where : ""), ...b)).map(r => fromDb(name, r)); }
-/* các lệnh ghi được gom lại, chạy một lần (cùng lúc tăng số phiên bản dữ liệu) */
 insert(name, objs) {
 const cols = Object.keys(SCHEMA[name]);
 for (const o of objs) this.w.push(this.d.prepare("INSERT INTO " + name + " (" + cols.map(q_).join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ")")
@@ -70,7 +61,6 @@ this.w.push(this.d.prepare("UPDATE CaiDat SET value = CAST(CAST(value AS INTEGER
 const r = await this.d.batch(this.w); this.w = []; SNAP = null; return r;
 }
 }
-/* ---------------- ảnh chụp dữ liệu hay dùng, giữ trong bộ nhớ tới khi có thay đổi ---------------- */
 let SNAP = null;
 async function snap(db) {
 const v = await db.first("SELECT value FROM CaiDat WHERE \"key\"='_ver'");
@@ -98,7 +88,6 @@ checks: {}
 };
 return SNAP;
 }
-/* ---------------- đăng nhập, chống dò PIN ---------------- */
 const KHOA = new Map(); // ip -> khóa tới lúc nào (trong bộ nhớ)
 async function auth(ctx, pin, need) {
 const { db, ip } = ctx;
@@ -121,7 +110,6 @@ if (need === true && role !== "admin") throw err("Chỉ quản lý mới làm đ
 if (need === "truong" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý mới làm được việc này.");
 return role;
 }
-/* ---------------- tiện ích ---------------- */
 function uid_() { return crypto.randomUUID().replace(/-/g, "").slice(0, 12); }
 function str_(v, max) { return String(v == null ? "" : v).slice(0, max || 500); }
 function name_(v) { const s = str_(v, 60).trim(); if (!s) throw err("Thiếu tên người thực hiện."); return s; }
@@ -131,14 +119,13 @@ return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(
 .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "x";
 }
 const byAtDesc = (a, b) => b.at - a.at;
-/* ---------------- tồn kho ---------------- */
 function applyMove_(a, m) {
 const q = Number(m.qty) || 0;
 switch (m.kind) {
 case "nhap": a.tong += q; break;
 case "cap": a.tong -= q; a.moi += q; break;
 case "xuat": if (m.src === "sua") a.sua -= q; else a.moi -= q; break;
-case "gom_sua": a.cho += q; break;
+case "gom_sua": a.cho += q; if (m.src === "moi" || m.src === "sua") a[m.src] -= q; break;
 case "nhap_sau_sua": a.cho -= q; a.sua += q; break;
 case "huy": { const l = m.loc || (m.from === "tot" ? "moi" : "cho"); a[l] -= q; break; }
 case "dieu_chinh": { const l = m.loc || "moi"; a[l] += q; break; }
@@ -151,7 +138,6 @@ parts.forEach(p => st[p.id] = base_(p));
 moves.forEach(m => { const a = st[m.partId]; if (a && m.at > a.at && m.at <= T) applyMove_(a, m); });
 return st;
 }
-/* ================= các chức năng gọi từ app ================= */
 const API = {
 async login(ctx, pin) { return auth(ctx, pin); },
 async phienBan() { return PHIEN_BAN; },
@@ -232,12 +218,13 @@ if (!x) throw err("Không tìm thấy yêu cầu.");
 if (x.status !== "cho") throw err("Yêu cầu này đã được xử lý.");
 const now = Date.now(); const rows = [];
 const base = { partId: x.partId, partName: x.partName, kartId: x.kartId, kartLabel: x.kartLabel, ticketId: x.ticketId, from: "", src: "", old: "", by: x.by };
+const tuKe = x.type === "gom" && (x.src === "moi" || x.src === "sua") ? x.src : "";
 const tag = " (xác nhận: " + who + ")";
 let patch;
 if (x.type === "gom") {
 const q = fix && fix.qty !== undefined ? Number(fix.qty) : x.qty;
 if (!(q >= 0) || Math.floor(q) !== q) throw err("Số lượng không hợp lệ.");
-if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", note: (x.note || "Gom hàng hư") + tag }));
+if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", src: tuKe, note: (x.note || "Gom hàng hư") + tag }));
 patch = { status: "duyet", duyetBy: who, duyetAt: now, qty: q };
 } else {
 const ok = fix && fix.ok !== undefined ? Number(fix.ok) : x.ok, bad = fix && fix.bad !== undefined ? Number(fix.bad) : x.bad;
@@ -246,7 +233,6 @@ if (ok > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind:
 if (bad > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now + 1, kind: "huy", qty: bad, loc: "cho", note: (x.note || "Thợ kiểm tra: không sửa được") + tag }));
 patch = { status: "duyet", duyetBy: who, duyetAt: now, ok: ok, bad: bad };
 }
-// Đổi trạng thái trước, chỉ khi vẫn đang "chờ": hai người bấm cùng lúc thì chỉ một người được ghi kho
 ctx.db.update("XacNhan", String(id), patch, " AND status='cho'");
 const r = await ctx.db.commit();
 if (r[0].meta.changes === 0) throw err("Yêu cầu này đã được xử lý.");
@@ -276,7 +262,6 @@ ctx.db.insert("BaoTri", [{ id: "B" + uid_(), at: now, kartId: kid, kartLabel: ka
 ctx.db.update("Xe", kid, { lastMaintAt: now, lastMaintBy: by });
 await ctx.db.commit(); return true;
 },
-/* ----- quản lý ----- */
 async addKarts(ctx, pin, type, nums) {
 await auth(ctx, pin, true);
 if (!TYPES[type]) throw err("Loại xe không hợp lệ.");
@@ -355,13 +340,11 @@ ctx.db.setConfig({ closingAt: T });
 await ctx.db.commit();
 return S.parts.length;
 },
-/** Tồn kho hiện tại của mọi vật tư, tính trên máy chủ (để đối chiếu với app). */
 async tonKho(ctx, pin) {
 await auth(ctx, pin, "truong");
 const S = await snap(ctx.db);
 return balances_(S.parts, S.moves, Date.now() + 1000);
 },
-/** Nạp kiểm kê từ file (app đọc file, gửi các dòng lên). mode "dat": đặt số đầu kỳ; "kiemke": kiểm kê định kỳ. */
 async importKiemKe(ctx, pin, mode, by, table) {
 const role = await auth(ctx, pin, "truong");
 if (mode === "dat" && role !== "admin") throw err("Chỉ quản lý mới đặt số đầu kỳ.");
@@ -374,7 +357,7 @@ const S = await snap(ctx.db);
 const parts = S.parts.filter(p => p.active);
 const s0 = balances_(parts, S.moves, from - 1), s1 = balances_(parts, S.moves, to - 1);
 const inPeriod = await ctx.db.rows("GiaoDich", "at>=? AND at<?", from, to);
-const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, bo: 0, suaDuoc: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
+const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, hong: 0, bo: 0, suaDuoc: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
 const agg = {}; parts.forEach(p => agg[p.id] = z());
 inPeriod.forEach(m => {
 const a = agg[m.partId]; if (!a) return;
@@ -382,7 +365,7 @@ const q = Number(m.qty) || 0, l = m.loc || (m.kind === "huy" ? (m.from === "tot"
 if (m.kind === "nhap") a.nhap += q;
 else if (m.kind === "cap") a.cap += q;
 else if (m.kind === "xuat") { if (m.src === "sua") a.xuatSua += q; else a.xuatMoi += q; if (m.old === "bo") a.bo += q; }
-else if (m.kind === "gom_sua") a.gom += q;
+else if (m.kind === "gom_sua") { if (m.src === "moi" || m.src === "sua") a.hong += q; else a.gom += q; }
 else if (m.kind === "nhap_sau_sua") a.suaDuoc += q;
 else if (m.kind === "huy") a["huy" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
 else if (m.kind === "dieu_chinh") a["dc" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
@@ -390,7 +373,6 @@ else if (m.kind === "dieu_chinh") a["dc" + l.charAt(0).toUpperCase() + l.slice(1
 return parts.map(p => ({ id: p.id, group: p.group, name: p.name, unit: p.unit, threshold: p.threshold, threshTong: p.threshTong,
 start: s0[p.id], end: s1[p.id], a: agg[p.id], baseInPeriod: (p.baseAt || 0) >= from && (p.baseAt || 0) < to }));
 },
-/* ----- phiếu nhập hàng ----- */
 async taoPhieuNhap(ctx, pin, ph) {
 await auth(ctx, pin, true);
 const by = name_(ph.by);
@@ -454,7 +436,6 @@ kartId: "", kartLabel: "", ticketId: p.id, from: "", by: who, note: "Hủy phi�
 await ctx.db.commit();
 return true;
 },
-/** Toàn bộ dữ liệu (quản lý): tải bản sao lưu về máy / chép sang Google Sheet. */
 async saoLuuToanBo(ctx, pin) {
 await auth(ctx, pin, true);
 const out = {};
@@ -473,6 +454,7 @@ const S = await snap(ctx.db);
 const karts = S.karts, parts = S.parts;
 const now = Date.now();
 if (!Array.isArray(list) || !list.length) throw err("Chưa có dòng nào.");
+let bal = null;
 const rows = list.map((m, i) => {
 const kind = str_(m.kind, 20);
 if (!KINDS.includes(kind)) throw err("Loại giao dịch không hợp lệ.");
@@ -488,11 +470,15 @@ const qty = Number(m.qty);
 if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0)) throw err("Số lượng không hợp lệ.");
 const part = parts.find(p => p.id === m.partId);
 if (!part) throw err("Phụ tùng không tồn tại.");
+if (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) {
+const ton = (bal || (bal = balances_(parts, S.moves, Infinity)))[part.id] || {};
+if (qty > (ton[m.src] || 0)) throw err(part.name + ": kệ xưởng chỉ còn " + (ton[m.src] || 0) + " " + (m.src === "sua" ? "hàng đã sửa" : "hàng mới") + ", không báo hỏng " + qty + " được.");
+}
 return {
 id: "G" + uid_(), at: now + i, kind: kind, partId: m.partId, partName: part.name, qty: qty,
 kartId: str_(m.kartId, 40), kartLabel: m.kartId ? kartLabel_(m.kartId, karts) : "", ticketId: str_(m.ticketId, 40),
 from: "", by: name_(m.by), note: str_(m.note),
-src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : "", loc: (kind === "huy" || kind === "dieu_chinh") ? loc : "",
+src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) ? m.src : "", loc: (kind === "huy" || kind === "dieu_chinh") ? loc : "",
 old: kind === "xuat" ? (m.old === "bo" ? "bo" : m.old === "gom" ? "gom" : "") : ""
 };
 });
@@ -500,11 +486,10 @@ const pend = [], direct = [];
 rows.forEach(r => { if (r.kind === "gom_sua" && role === "staff") pend.push(r); else direct.push(r); });
 ctx.db.insert("GiaoDich", direct);
 ctx.db.insert("XacNhan", pend.map(r => ({ id: "X" + uid_(), at: r.at, type: "gom", partId: r.partId, partName: r.partName, qty: r.qty, ok: 0, bad: 0,
-kartId: r.kartId, kartLabel: r.kartLabel, ticketId: r.ticketId, by: r.by, note: r.note, status: "cho" })));
+kartId: r.kartId, kartLabel: r.kartLabel, ticketId: r.ticketId, by: r.by, note: r.note, status: "cho", src: r.src })));
 await ctx.db.commit();
 return { moves: direct.length, pending: pend.length };
 }
-/* ----- kiểm kê từ file: app gửi bảng (mảng các dòng), máy chủ tự tìm dòng tiêu đề ----- */
 function docBangKiemKe_(v) {
 if (!Array.isArray(v) || !v.length) throw err("File kiểm kê trống.");
 const norm = x => String(x == null ? "" : x).trim().toLowerCase().normalize("NFC");
@@ -568,7 +553,6 @@ await ctx.db.commit();
 return (mode === "dat" ? "Đã đặt số đầu kỳ cho " : "Đã kiểm kê ") + list.length + " vật tư (" + added + " mới, " + updated + " cập nhật)." +
 (mode === "kiemke" ? " Ghi " + diffs.length + " dòng chênh lệch." : "") + (hidden ? " Ẩn " + hidden + " vật tư không còn trong file." : "") + (dup.length ? " Bỏ qua dòng trùng: " + dup.join(", ") + "." : "");
 }
-/* ---------------- chống lệnh trùng (bấm đúp, mạng gửi lại) ---------------- */
 const GHI = ["addTicket", "updateTicket", "addMoves", "submitKtra", "approvePending", "rejectPending", "addCheck", "addMaint", "addKarts",
 "updateKart", "deleteKart", "savePart", "hidePart", "importParts", "saveConfig", "closeBook", "importKiemKe", "taoPhieuNhap", "huyPhieuNhap"];
 async function opBatDau(db, op) {
@@ -587,7 +571,6 @@ if (ok) await db.d.prepare("UPDATE Ops SET s='done', d=? WHERE op=?").bind(JSON.
 else await db.d.prepare("DELETE FROM Ops WHERE op=?").bind(op).run();
 if (Math.random() < 0.05) await db.d.prepare("DELETE FROM Ops WHERE t < ?").bind(Date.now() - 86400000).run();
 }
-/* ---------------- cổng vào ---------------- */
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
 const json = (o, st) => new Response(JSON.stringify(o), { status: st || 200, headers: Object.assign({ "Content-Type": "application/json; charset=utf-8" }, CORS) });
 export default {

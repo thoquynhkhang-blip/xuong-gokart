@@ -17,11 +17,11 @@ const SCHEMA = {
   Checklist: { id: "s", date: "s", at: "d", by: "s", items: "a", note: "s" },
   BaoTri: { id: "s", at: "d", kartId: "s", kartLabel: "s", items: "a", by: "s", note: "s" },
   XacNhan: { id: "s", at: "d", type: "s", partId: "s", partName: "s", qty: "n", ok: "n", bad: "n", kartId: "s", kartLabel: "s", ticketId: "s",
-    by: "s", note: "s", status: "s", duyetBy: "s", duyetAt: "d", lyDo: "s" },
+    by: "s", note: "s", status: "s", duyetBy: "s", duyetAt: "d", lyDo: "s", src: "s" },
   PhieuNhap: { id: "s", ngay: "d", createdAt: "d", ncc: "s", soHD: "s", kiemBy: "s", by: "s", note: "s", soDong: "n", tongSL: "n", tongTien: "n",
     chiTiet: "s", anh: "a", status: "s", huyBy: "s", huyAt: "d", lyDoHuy: "s" }
 };
-const PHIEN_BAN = "cf-2026-11-19.1";
+const PHIEN_BAN = "cf-2026-11-19.2";
 const OPEN = ["cho", "dang", "doi"];
 const TYPES = { don: "Đơn", doi: "Đôi" };
 const q_ = c => '"' + c + '"';
@@ -146,7 +146,7 @@ function applyMove_(a, m) {
     case "nhap": a.tong += q; break;
     case "cap": a.tong -= q; a.moi += q; break;
     case "xuat": if (m.src === "sua") a.sua -= q; else a.moi -= q; break;
-    case "gom_sua": a.cho += q; break;
+    case "gom_sua": a.cho += q; if (m.src === "moi" || m.src === "sua") a[m.src] -= q; break;
     case "nhap_sau_sua": a.cho -= q; a.sua += q; break;
     case "huy": { const l = m.loc || (m.from === "tot" ? "moi" : "cho"); a[l] -= q; break; }
     case "dieu_chinh": { const l = m.loc || "moi"; a[l] += q; break; }
@@ -249,12 +249,13 @@ const API = {
     if (x.status !== "cho") throw err("Yêu cầu này đã được xử lý.");
     const now = Date.now(); const rows = [];
     const base = { partId: x.partId, partName: x.partName, kartId: x.kartId, kartLabel: x.kartLabel, ticketId: x.ticketId, from: "", src: "", old: "", by: x.by };
+    const tuKe = x.type === "gom" && (x.src === "moi" || x.src === "sua") ? x.src : "";
     const tag = " (xác nhận: " + who + ")";
     let patch;
     if (x.type === "gom") {
       const q = fix && fix.qty !== undefined ? Number(fix.qty) : x.qty;
       if (!(q >= 0) || Math.floor(q) !== q) throw err("Số lượng không hợp lệ.");
-      if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", note: (x.note || "Gom hàng hư") + tag }));
+      if (q > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "gom_sua", qty: q, loc: "", src: tuKe, note: (x.note || "Gom hàng hư") + tag }));
       patch = { status: "duyet", duyetBy: who, duyetAt: now, qty: q };
     } else {
       const ok = fix && fix.ok !== undefined ? Number(fix.ok) : x.ok, bad = fix && fix.bad !== undefined ? Number(fix.bad) : x.bad;
@@ -398,7 +399,7 @@ const API = {
     const parts = S.parts.filter(p => p.active);
     const s0 = balances_(parts, S.moves, from - 1), s1 = balances_(parts, S.moves, to - 1);
     const inPeriod = await ctx.db.rows("GiaoDich", "at>=? AND at<?", from, to);
-    const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, bo: 0, suaDuoc: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
+    const z = () => ({ nhap: 0, cap: 0, xuatMoi: 0, xuatSua: 0, gom: 0, hong: 0, bo: 0, suaDuoc: 0, huyCho: 0, huyMoi: 0, huySua: 0, huyTong: 0, dcTong: 0, dcMoi: 0, dcSua: 0, dcCho: 0 });
     const agg = {}; parts.forEach(p => agg[p.id] = z());
     inPeriod.forEach(m => {
       const a = agg[m.partId]; if (!a) return;
@@ -406,7 +407,7 @@ const API = {
       if (m.kind === "nhap") a.nhap += q;
       else if (m.kind === "cap") a.cap += q;
       else if (m.kind === "xuat") { if (m.src === "sua") a.xuatSua += q; else a.xuatMoi += q; if (m.old === "bo") a.bo += q; }
-      else if (m.kind === "gom_sua") a.gom += q;
+      else if (m.kind === "gom_sua") { if (m.src === "moi" || m.src === "sua") a.hong += q; else a.gom += q; }
       else if (m.kind === "nhap_sau_sua") a.suaDuoc += q;
       else if (m.kind === "huy") a["huy" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
       else if (m.kind === "dieu_chinh") a["dc" + l.charAt(0).toUpperCase() + l.slice(1)] += q;
@@ -501,6 +502,7 @@ async function addMoves_(ctx, role, list) {
   const karts = S.karts, parts = S.parts;
   const now = Date.now();
   if (!Array.isArray(list) || !list.length) throw err("Chưa có dòng nào.");
+  let bal = null;
   const rows = list.map((m, i) => {
     const kind = str_(m.kind, 20);
     if (!KINDS.includes(kind)) throw err("Loại giao dịch không hợp lệ.");
@@ -516,11 +518,15 @@ async function addMoves_(ctx, role, list) {
     if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0)) throw err("Số lượng không hợp lệ.");
     const part = parts.find(p => p.id === m.partId);
     if (!part) throw err("Phụ tùng không tồn tại.");
+    if (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) {
+      const ton = (bal || (bal = balances_(parts, S.moves, Infinity)))[part.id] || {};
+      if (qty > (ton[m.src] || 0)) throw err(part.name + ": kệ xưởng chỉ còn " + (ton[m.src] || 0) + " " + (m.src === "sua" ? "hàng đã sửa" : "hàng mới") + ", không báo hỏng " + qty + " được.");
+    }
     return {
       id: "G" + uid_(), at: now + i, kind: kind, partId: m.partId, partName: part.name, qty: qty,
       kartId: str_(m.kartId, 40), kartLabel: m.kartId ? kartLabel_(m.kartId, karts) : "", ticketId: str_(m.ticketId, 40),
       from: "", by: name_(m.by), note: str_(m.note),
-      src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : "", loc: (kind === "huy" || kind === "dieu_chinh") ? loc : "",
+      src: kind === "xuat" ? (m.src === "sua" ? "sua" : "moi") : (kind === "gom_sua" && (m.src === "moi" || m.src === "sua")) ? m.src : "", loc: (kind === "huy" || kind === "dieu_chinh") ? loc : "",
       old: kind === "xuat" ? (m.old === "bo" ? "bo" : m.old === "gom" ? "gom" : "") : ""
     };
   });
@@ -528,7 +534,7 @@ async function addMoves_(ctx, role, list) {
   rows.forEach(r => { if (r.kind === "gom_sua" && role === "staff") pend.push(r); else direct.push(r); });
   ctx.db.insert("GiaoDich", direct);
   ctx.db.insert("XacNhan", pend.map(r => ({ id: "X" + uid_(), at: r.at, type: "gom", partId: r.partId, partName: r.partName, qty: r.qty, ok: 0, bad: 0,
-    kartId: r.kartId, kartLabel: r.kartLabel, ticketId: r.ticketId, by: r.by, note: r.note, status: "cho" })));
+    kartId: r.kartId, kartLabel: r.kartLabel, ticketId: r.ticketId, by: r.by, note: r.note, status: "cho", src: r.src })));
   await ctx.db.commit();
   return { moves: direct.length, pending: pend.length };
 }
