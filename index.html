@@ -207,7 +207,7 @@ const TABS = [
 /* ---------- state ---------- */
 const START_KART_T = "<?= startKart ?>";
 /* Chạy được 2 kiểu: mở từ link Apps Script (google.script.run) hoặc từ trang app riêng (gọi API bằng fetch) */
-const API_URL = "https://script.google.com/macros/s/AKfycbyRhw_VMLU1NipA1c1o03RDFyeg-XDuqQpj2ltNlqGsFBalNF2W8T2OsutJYmwqpcz4FQ/exec";
+const API_URL = window.GK_API || "https://xuong-gokart-api.tho-quynhkhang.workers.dev";
 const IS_GAS = !!(window.google&&google.script&&google.script.run);
 const START_KART = /^[a-z0-9-]*$/i.test(START_KART_T) && IS_GAS ? START_KART_T : (new URLSearchParams(location.search).get("xe")||"");
 const S = {pin:"", role:"", isEditor:false, isTruong:false, pending:[], readOnly:false, loading:false, lastLoad:0,
@@ -338,8 +338,9 @@ async function load(){
   if(!S.pin||S.loading) return; S.loading=true;
   const d=dayKey(); if(d!==curDay) curDay=d;
   try{
-    const r=await api("getAll", chkKey(curDay));
-    S.role=r.role; S.isEditor=r.role==="admin"; S.isTruong=r.role==="admin"||r.role==="truong"; S.pending=r.pending||[]; S.config=r.config||{};
+    const r=await api("getAll", chkKey(curDay), S.ver||"");
+    if(r.same){ S.err=null; S.lastLoad=Date.now(); S.loading=false; rerender(); return; }
+    S.ver=r.ver||""; S.role=r.role; S.isEditor=r.role==="admin"; S.isTruong=r.role==="admin"||r.role==="truong"; S.pending=r.pending||[]; S.config=r.config||{};
     S.karts=new Map(r.karts.map(x=>[x.id,x])); S.parts=new Map(r.parts.map(x=>[x.id,x]));
     S.tOpen=new Map(r.tOpen.map(x=>[x.id,x])); S.tRecent=new Map(r.tRecent.map(x=>[x.id,x]));
     S.moves=r.moves; S.checks=r.checks.sort((a,b)=>a.at-b.at);
@@ -347,7 +348,7 @@ async function load(){
   }catch(e){ const m=String((e&&e.message)||e); if(/PIN_SAI/.test(m)){ S.loading=false; logout("Mã PIN không đúng."); return; } S.err={code:m}; }
   S.loading=false; rerender();
 }
-function logout(msg){ S.ui.stockLoc="xuong"; S.ui.dc=null; S.pending=[]; S.pin=""; lsSet("gk_pin",""); S.lastLoad=0; S.karts=new Map(); S.parts=new Map(); render(); if(msg) toast(msg,"bad",6000); }
+function logout(msg){ S.ver=""; S.ui.stockLoc="xuong"; S.ui.dc=null; S.pending=[]; S.pin=""; lsSet("gk_pin",""); S.lastLoad=0; S.karts=new Map(); S.parts=new Map(); render(); if(msg) toast(msg,"bad",6000); }
 async function boot(){
   curDay=dayKey();
   S.pin=lsGet("gk_pin");
@@ -511,7 +512,7 @@ function vStock(){
     if(need.length) h+='<div class="banner small" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span><b>'+need.length+' mã cần mua</b> (kho tổng hết hoặc dưới ngưỡng): '+esc(need.slice(0,6).map(p=>p.name).join(", "))+(need.length>6?"…":"")+'</span>'+(S.isEditor?'<button class="btn sm" type="button" data-a="pnNew" data-need="1">Lập phiếu nhập cho hàng cần mua</button>':'')+'</div>';
     h+='<div class="quick">'+(S.isEditor?'<button class="btn pri" type="button" data-a="pnNew">Lập phiếu nhập hàng</button>':'')+'<a class="btn" href="#phieu-nhap">Phiếu nhập đã lưu</a>'+'<button class="btn'+(S.isEditor?'':' pri')+'" type="button" data-a="mv" data-k="cap">Cấp xuống kệ xưởng</button><button class="btn" type="button" data-a="mv" data-k="huy" data-loc="tong">Hủy hàng kho tổng</button>'+(S.isEditor?'<button class="btn" type="button" data-a="mv" data-k="dieu_chinh" data-loc="tong">Kiểm kê kho tổng</button>':'')+'</div>';
   }
-  if(S.isTruong) h+='<div class="card small stack"><span><b>Kiểm kê bằng file:</b> điền số đếm vào file <a href="https://docs.google.com/spreadsheets/d/1v5yq3ip4MhIGqwarN_4GloMkTYfYlvio7BdI5KPo8fQ/edit" target="_blank" rel="noopener">Kiểm kê vật tư Gokart (2 kho)</a> rồi bấm nạp. Ô để trống là không đếm, giữ nguyên số trong app. Phần chênh lệch được ghi lại để đối chiếu.'+(S.isEditor?'':' Trưởng bộ phận chỉ kiểm kê được kệ xưởng.')+'</span><div class="inline"><button class="btn sm" type="button" data-a="impKiemKe" data-v="kiemke">Nạp kiểm kê định kỳ</button>'+(S.isEditor?'<button class="btn sm" type="button" data-a="impKiemKe" data-v="dat">Đặt số đầu kỳ (không tính chênh lệch)</button>':'')+'</div></div>';
+  if(S.isTruong) h+='<div class="card small stack"><span><b>Kiểm kê bằng file Excel:</b> tải file mẫu (có sẵn danh sách vật tư), điền số đếm rồi nạp lại. Ô để trống là không đếm, giữ nguyên số trong app. Phần chênh lệch được ghi lại để đối chiếu.'+(S.isEditor?'':' Trưởng bộ phận chỉ kiểm kê được kệ xưởng.')+'</span><div class="inline"><button class="btn sm" type="button" data-a="kkMau">Tải file mẫu kiểm kê</button><button class="btn sm" type="button" data-a="impKiemKe" data-v="kiemke">Nạp kiểm kê định kỳ</button>'+(S.isEditor?'<button class="btn sm" type="button" data-a="impKiemKe" data-v="dat">Đặt số đầu kỳ (không tính chênh lệch)</button>':'')+'</div></div>';
   h+='<input class="search" id="partQ" type="search" placeholder="Tìm phụ tùng: lốp, pin, bạc đạn…" value="'+esc(S.ui.partQ)+'" aria-label="Tìm phụ tùng">';
   if(!ps.length){ h+='<div class="list"><div class="empty">'+(S.parts.size?'Không tìm thấy phụ tùng nào.':'Kho chưa có dữ liệu.')+'</div></div>'; return h+'</section>'; }
   let g=null; h+='<div class="list">';
@@ -540,7 +541,7 @@ function vMore(){
   h+='<button class="row" type="button" data-a="who"><div class="main"><span class="t">Đổi tên người dùng trên máy này</span><span class="m">Hiện tại: '+esc(myName()||"chưa đặt")+'</span></div></button>';
   h+='<button class="row" type="button" data-a="logout"><div class="main"><span class="t">Đăng xuất khỏi máy này</span><span class="m">Đang đăng nhập với quyền '+(S.isEditor?'quản lý':S.isTruong?'trưởng bộ phận':'nhân viên')+'</span></div></button>';
   h+='</div></section>';
-  h+='<div class="card small muted">Mọi người dùng chung một bộ dữ liệu, lưu trong Google Sheet của xưởng. App tự cập nhật mỗi 30 giây. Tên bạn gõ được lưu trên máy này để điền sẵn ở các lần sau.</div>';
+  h+='<div class="card small muted">Mọi người dùng chung một bộ dữ liệu, lưu trên máy chủ của xưởng. App tự cập nhật mỗi 30 giây. Tên bạn gõ được lưu trên máy này để điền sẵn ở các lần sau.</div>';
   return h;
 }
 function vHistory(){
@@ -559,13 +560,13 @@ function vHistory(){
   const kRows=Object.keys(Object.assign({},kAgg,kTk)).map(id=>({k:kartById(id),parts:kAgg[id]||0,tk:kTk[id]||0})).sort((a,b)=>(b.parts+b.tk*2)-(a.parts+a.tk*2)).slice(0,10);
   const done=tk.filter(t=>t.status==="xong"&&t.doneAt); const avg=done.length? done.reduce((s,t)=>s+(t.doneAt-t.createdAt),0)/done.length : 0;
   h+='<section class="tiles"><div class="tile t-info"><span class="k">Phiếu sửa tạo mới</span><span class="v num">'+tk.length+'</span><span class="d">'+done.length+' đã xong</span></div><div class="tile t-info"><span class="k">Thời gian nằm xưởng TB</span><span class="v num" style="font-size:28px">'+dur(avg)+'</span><span class="d">từ báo hỏng đến xong</span></div><div class="tile t-warn"><span class="k">Lượt xuất phụ tùng</span><span class="v num">'+mv.filter(m=>m.kind==="xuat").length+'</span><span class="d">giao dịch</span></div><div class="tile t-bad"><span class="k">Lượt hủy</span><span class="v num">'+mv.filter(m=>m.kind==="huy").length+'</span><span class="d">giao dịch</span></div></section>';
-  h+='<div class="inline"><button class="btn" type="button" data-a="exportHist">Xuất báo cáo ra Google Sheets</button></div>';
+  h+='<div class="inline"><button class="btn" type="button" data-a="exportHist">Xuất báo cáo ra Excel</button></div>';
   h+='<div class="sec-h"><h2 style="font-size:18px">Hao hụt phụ tùng trong kỳ</h2></div>';
   h+= rows.length? '<div class="tbl-wrap"><table><thead><tr><th>Phụ tùng</th><th class="n">Nhập mua</th><th class="n">Cấp xuống</th><th class="n">Thay cho xe</th><th class="n">Gom hàng hư</th><th class="n">Sửa được</th><th class="n">Hủy</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+esc(partLabel(r.p))+'<div class="small muted">'+esc(r.p?r.p.group:"")+'</div></td><td class="n">'+r.a.nhap+'</td><td class="n">'+r.a.cap+'</td><td class="n"><b>'+r.a.xuat+'</b></td><td class="n">'+r.a.gom_sua+'</td><td class="n">'+r.a.nhap_sau_sua+'</td><td class="n">'+r.a.huy+'</td></tr>').join("")+'</tbody></table></div>' : '<div class="card small muted">Không có giao dịch kho trong kỳ.</div>';
   h+='<div class="sec-h"><h2 style="font-size:18px">Xe tốn công nhất</h2><span class="sub">theo số phụ tùng thay và số lần hỏng</span></div>';
   h+= kRows.length? '<div class="tbl-wrap"><table><thead><tr><th>Xe</th><th class="n">Lần báo hỏng</th><th class="n">Phụ tùng đã thay</th></tr></thead><tbody>'+kRows.map(r=>'<tr><td><a href="#xe-'+esc(r.k?r.k.id:"")+'" style="color:inherit;font-weight:600">'+esc(kartLabel(r.k))+'</a></td><td class="n">'+r.tk+'</td><td class="n">'+r.parts+'</td></tr>').join("")+'</tbody></table></div>' : '<div class="card small muted">Chưa có dữ liệu theo xe trong kỳ.</div>';
   h+='<div class="sec-h"><h2 style="font-size:18px">Giao dịch kho</h2><span class="sub">'+mv.length+' dòng'+''+'</span></div>';
-  h+= mv.length? '<div class="tbl-wrap"><table><thead><tr><th>Thời gian</th><th>Loại</th><th>Phụ tùng</th><th class="n">SL</th><th>Xe</th><th>Người</th><th>Ghi chú</th></tr></thead><tbody>'+mv.slice(0,300).map(m=>'<tr><td class="num" style="white-space:nowrap">'+fmtT(m.at)+'</td><td>'+esc(MOVE_LABEL[m.kind]||m.kind)+'</td><td>'+esc(partLabel(S.parts.get(m.partId)))+'</td><td class="n">'+esc(m.qty)+'</td><td>'+(m.kartId?esc(kartLabel(kartById(m.kartId))):"")+'</td><td>'+esc(m.by||"")+'</td><td>'+esc(m.note||"")+'</td></tr>').join("")+'</tbody></table></div>'+(mv.length>300?'<div class="small muted">Bảng chỉ hiện 300 dòng, xuất ra Google Sheets để xem đủ.</div>':'') : '';
+  h+= mv.length? '<div class="tbl-wrap"><table><thead><tr><th>Thời gian</th><th>Loại</th><th>Phụ tùng</th><th class="n">SL</th><th>Xe</th><th>Người</th><th>Ghi chú</th></tr></thead><tbody>'+mv.slice(0,300).map(m=>'<tr><td class="num" style="white-space:nowrap">'+fmtT(m.at)+'</td><td>'+esc(MOVE_LABEL[m.kind]||m.kind)+'</td><td>'+esc(partLabel(S.parts.get(m.partId)))+'</td><td class="n">'+esc(m.qty)+'</td><td>'+(m.kartId?esc(kartLabel(kartById(m.kartId))):"")+'</td><td>'+esc(m.by||"")+'</td><td>'+esc(m.note||"")+'</td></tr>').join("")+'</tbody></table></div>'+(mv.length>300?'<div class="small muted">Bảng chỉ hiện 300 dòng, xuất ra Excel để xem đủ.</div>':'') : '';
   return h+'</section>';
 }
 function dcTables(rows){
@@ -602,7 +603,7 @@ function vDoiChieu(){
   h+=tbl("2. Đồ cũ thu về","mỗi cái thay mới phải có đồ cũ gom về hoặc báo bỏ",["Thay cho xe","Gom về (đã xác nhận)","Báo bỏ","Chưa rõ"],T2,3);
   h+=tbl("3. Hàng hư chờ kiểm tra","",["Đầu kỳ","Gom vào","Sửa được","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3,4);
   h+=tbl("4. Kho tổng","cuối kỳ = đầu + nhập mua − cấp xuống − hủy ± chênh lệch",["Đầu kỳ","Nhập mua","Cấp xuống","Hủy","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T4,5);
-  h+='<div class="inline"><button class="btn" type="button" data-a="dcExport">Xuất đối chiếu ra Google Sheets</button></div>';
+  h+='<div class="inline"><button class="btn" type="button" data-a="dcExport">Xuất đối chiếu ra Excel</button></div>';
   return h+'</section>';
 }
 function vSettings(){
@@ -610,17 +611,18 @@ function vSettings(){
   const nMoves=S.moves.length; const lastC=Number(S.config.closingAt)||0;
   let h='<section class="sec"><div class="sec-h"><h2>Cài đặt</h2><span class="sub">chỉ quản lý thấy trang này</span></div>';
   h+='<div class="card stack"><b>1. Danh sách xe</b><span class="small muted">Hiện có '+S.karts.size+' xe. Thêm theo dải số, ví dụ xe đơn từ 1 đến 70. Xe đã có thì bỏ qua.</span><div class="inline"><button class="btn pri" type="button" data-a="addKarts">Thêm xe theo dải số</button><a class="btn" href="#qr">In mã QR dán xe</a></div><span class="small muted">Muốn cho xe ngưng dùng hoặc dùng lại: mở xe trong tab Xe.</span></div>';
-  h+='<div class="card stack"><b>2. Danh mục & tồn kho</b><span class="small muted">Thêm hoặc đổi tên vật tư trong file <a href="https://docs.google.com/spreadsheets/d/1v5yq3ip4MhIGqwarN_4GloMkTYfYlvio7BdI5KPo8fQ/edit" target="_blank" rel="noopener">Kiểm kê vật tư Gokart (2 kho)</a> rồi nạp ở tab Kho. Hoặc thêm từng mã ở đây.</span><div class="inline"><button class="btn" type="button" data-a="editPart">Thêm 1 phụ tùng</button><a class="btn" href="#kho">Tới tab Kho</a></div></div>';
+  h+='<div class="card stack"><b>2. Danh mục & tồn kho</b><span class="small muted">Thêm hoặc đổi tên nhiều vật tư: tải file mẫu kiểm kê ở tab Kho, sửa rồi nạp lại. Hoặc thêm từng mã ở đây.</span><div class="inline"><button class="btn" type="button" data-a="editPart">Thêm 1 phụ tùng</button><a class="btn" href="#kho">Tới tab Kho</a></div></div>';
   h+='<div class="card stack"><b>3. Checklist & bảo trì</b><span class="small muted">'+daily().length+' mục đầu ngày · '+maintItems().length+' mục bảo trì · chu kỳ '+maintDays()+' ngày</span><div class="inline"><button class="btn" type="button" data-a="editChecklist">Sửa danh sách mục</button></div></div>';
-  h+='<div class="card stack"><b>4. Chốt sổ kho</b><span class="small muted">Đang có <b>'+nMoves+'</b> giao dịch kho kể từ lần chốt trước ('+(lastC?fmtT(lastC):"chưa chốt")+'). Nên chốt mỗi tháng để app tải nhanh; lịch sử cũ vẫn nằm nguyên trong sheet GiaoDich và tra được ở Lịch sử.</span><div class="inline"><button class="btn" type="button" data-a="closeBook">Chốt sổ ngay</button></div></div>';
-  h+='<div class="card stack"><b>5. Đăng nhập & phân quyền</b><span class="small muted">3 mã PIN: <b>nhân viên</b> (thay đồ, gom hàng hư, gửi kết quả kiểm tra), <b>trưởng bộ phận</b> (thêm: cấp hàng từ kho tổng, kiểm kê kệ xưởng, xác nhận hàng hư), <b>quản lý</b> (toàn quyền, nhập mua, kiểm kê kho tổng, đối chiếu). Muốn đổi mã PIN: nhắn Claude đổi giúp.</span><span class="small muted">Dữ liệu nằm trong Google Sheet "Gokart – Dữ liệu app" (thư mục 01). Đừng sửa tay cột Mã.</span></div>';
+  h+='<div class="card stack"><b>4. Chốt sổ kho</b><span class="small muted">Đang có <b>'+nMoves+'</b> giao dịch kho kể từ lần chốt trước ('+(lastC?fmtT(lastC):"chưa chốt")+'). Nên chốt mỗi tháng để app tải nhanh; lịch sử cũ vẫn được giữ nguyên và tra được ở Lịch sử.</span><div class="inline"><button class="btn" type="button" data-a="closeBook">Chốt sổ ngay</button></div></div>';
+  h+='<div class="card stack"><b>5. Đăng nhập & phân quyền</b><span class="small muted">3 mã PIN: <b>nhân viên</b> (thay đồ, gom hàng hư, gửi kết quả kiểm tra), <b>trưởng bộ phận</b> (thêm: cấp hàng từ kho tổng, kiểm kê kệ xưởng, xác nhận hàng hư), <b>quản lý</b> (toàn quyền, nhập mua, kiểm kê kho tổng, đối chiếu). Muốn đổi mã PIN: nhắn Claude đổi giúp.</span></div>';
+  h+='<div class="card stack"><b>6. Sao lưu</b><span class="small muted">Dữ liệu nằm trên máy chủ Cloudflare, có thể khôi phục về bất kỳ thời điểm nào trong 7 ngày qua. Nên tải thêm một bản Excel về máy mỗi tuần.</span><div class="inline"><button class="btn" type="button" data-a="saoLuu">Tải bản sao lưu (Excel)</button></div></div>';
   return h+'</section>';
 }
 function vQR(){
-  const url=IS_GAS? (S.config.appUrl||"") : location.origin+location.pathname;
-  let h='<section class="sec"><div class="sec-h"><h2>Mã QR dán xe</h2><span class="sub">quét bằng camera điện thoại để mở ngay trang xe</span><div class="act"><a class="btn pri sm" href="'+esc((S.config.appUrl||"")+"?page=qr"+(IS_GAS?"":"&base="+encodeURIComponent(url)))+'" target="_blank" rel="noopener">Mở trang in QR</a></div></div>';
+  const url=location.origin+location.pathname;
+  let h='<section class="sec"><div class="sec-h"><h2>Mã QR dán xe</h2><span class="sub">quét bằng camera điện thoại để mở ngay trang xe</span><div class="act"><button class="btn pri sm" type="button" data-a="qrPrint">In mã QR</button></div></div>';
   if(!url){ h+='<div class="banner">Chưa lấy được link app. Hãy mở app từ link Triển khai.</div>'; return h+'</section>'; }
-  if(!window.QRCode){ h+='<div class="banner">Không tải được thư viện tạo mã QR. Dùng nút Mở trang in QR.</div>'; return h+'</section>'; }
+  if(!window.QRCode){ h+='<div class="banner">Không tải được thư viện tạo mã QR. Kiểm tra mạng rồi tải lại trang.</div>'; return h+'</section>'; }
   const ks=sortedKarts().filter(k=>k.active!==false);
   h+= ks.length? '<div class="qrs">'+ks.map(k=>'<div class="qr"><div class="qrc" data-u="'+esc(url+"?xe="+k.id)+'"></div><span class="l">'+esc(kartLabel(k))+'</span></div>').join("")+'</div>' : '<div class="list"><div class="empty">Chưa có xe.</div></div>';
   return h+'</section>';
@@ -909,12 +911,24 @@ A.exportHist = async (d,btn)=>{
     {name:"Giao dịch kho", rows:[["Thời gian","Loại","Nhóm","Phụ tùng","Số lượng","Xe","Người","Ghi chú"]].concat(R.moves.map(m=>{ const p=S.parts.get(m.partId); return [fmtT(m.at)+"/"+new Date(m.at).getFullYear(), MOVE_LABEL[m.kind]||m.kind, p?p.group:"", partLabel(p), m.qty, m.kartId?kartLabel(kartById(m.kartId)):"", m.by||"", m.note||""]; }))},
     {name:"Phiếu sửa", rows:[["Báo lúc","Xe","Bộ phận","Mô tả","Ngưng chạy","Người báo","Trạng thái","Thợ","Xong lúc","Nằm xưởng (giờ)","Kết quả"]].concat(R.tickets.map(t=>[fmtT(t.createdAt), kartLabel(kartById(t.kartId)), t.cat||"", t.issue||"", t.blocking===false?"Không":"Có", t.reporter||"", T_STATUS[t.status]||t.status, t.fixer||"", t.doneAt?fmtT(t.doneAt):"", t.doneAt?Math.round((t.doneAt-t.createdAt)/36e5*10)/10:"", t.result||""]))}
   ];
-  btn.disabled=true; btn.textContent="Đang tạo file…";
-  try{ const url=await api("exportReport","Báo cáo Gokart "+tag, tables);
-    modal("Đã tạo báo cáo", '<p style="margin:0">File Google Sheets đã được lưu vào Drive, thư mục <b>App Gokart → 02. Báo cáo</b>.</p><a class="btn pri big" href="'+esc(url)+'" target="_blank" rel="noopener">Mở file báo cáo</a>');
-  }catch(e){ handleErr(e); }
-  btn.disabled=false; btn.textContent="Xuất báo cáo ra Google Sheets";
+  return xuatNut(btn, "Xuất báo cáo ra Excel", "Báo cáo Gokart "+tag, tables);
 };
+
+/* ---------- xuất file Excel ngay trên máy (không cần Google) ---------- */
+function loadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="xlsx.full.min.js"; s.onload=()=>res(window.XLSX); s.onerror=()=>rej(new Error("Không tải được bộ tạo file Excel. Kiểm tra mạng rồi thử lại.")); document.head.appendChild(s); });
+}
+async function xuatFile(title, tables){
+  const X=await loadXlsx(); const wb=X.utils.book_new();
+  tables.forEach(t=>{ const ws=X.utils.aoa_to_sheet(t.rows||[]); const w=(t.rows&&t.rows[0]||[]).map((_,j)=>({wch:Math.min(40,Math.max(8,...(t.rows||[]).slice(0,200).map(r=>String(r[j]==null?"":r[j]).length)))})); ws["!cols"]=w; X.utils.book_append_sheet(wb, ws, String(t.name).replace(/[\\\/\?\*\[\]:]/g," ").slice(0,31)); });
+  X.writeFile(wb, String(title).replace(/[\\\/:*?"<>|]/g,"-")+".xlsx");
+}
+async function xuatNut(btn, label, title, tables){
+  btn.disabled=true; btn.textContent="Đang tạo file…";
+  try{ await xuatFile(title, tables); toast("Đã tải file Excel về máy","ok"); }catch(e){ handleErr(e); }
+  btn.disabled=false; btn.textContent=label;
+}
 
 /* ---------- phiếu nhập hàng ---------- */
 function pnBlank(){ return {partId:"", qty:1, newName:"", newGroup:"", newUnit:"Cái"}; }
@@ -996,7 +1010,7 @@ function vPhieuNhap(){
   h+='<section class="tiles"><div class="tile t-info"><span class="k">Số phiếu</span><span class="v num">'+ok.length+'</span><span class="d">'+(R.rows.length-ok.length?(R.rows.length-ok.length)+' phiếu đã hủy':'trong khoảng ngày')+'</span></div><div class="tile t-ok"><span class="k">Tổng số món nhập</span><span class="v num">'+ok.reduce((a,x)=>a+x.tongSL,0)+'</span></div><div class="tile t-ok"><span class="k">Số mã vật tư</span><span class="v num">'+new Set(ok.flatMap(x=>x.items.map(i=>i.partId))).size+'</span><span class="d">khác nhau đã nhập</span></div></section>';
   if(!R.rows.length) return h+'<div class="list"><div class="empty">Chưa có phiếu nhập nào trong khoảng này.</div></div></section>';
   h+='<div class="list">'+R.rows.map(x=>'<button class="row'+(x.status==="huy"?" ph-huy":"")+'" type="button" data-a="pnView" data-id="'+esc(x.id)+'"><div class="main"><span class="t">'+esc(x.id)+' · '+fmtD(x.ngay)+'</span><span class="m">'+x.soDong+' mã, '+x.tongSL+' món · '+esc(x.items.slice(0,3).map(i=>i.name+" ×"+i.qty).join(", "))+(x.items.length>3?"…":"")+' · Lập: '+esc(x.by)+'</span></div><div class="r">'+(x.status==="huy"?'<span class="pill p-out">Đã hủy</span>':'')+'</div></button>').join("")+'</div>';
-  h+='<div class="inline"><button class="btn" type="button" data-a="pnExport">Xuất danh sách ra Google Sheets</button></div>';
+  h+='<div class="inline"><button class="btn" type="button" data-a="pnExport">Xuất danh sách ra Excel</button></div>';
   return h+'</section>';
 }
 A.pnLoad = async ()=>{
@@ -1025,14 +1039,28 @@ A.pnExport = async (d,btn)=>{
   const t1=[["Số phiếu","Ngày nhập","Số mã","Tổng số lượng","Người lập","Người kiểm nhận","Ghi chú","Trạng thái"]].concat(R.rows.map(x=>[x.id,fmtD(x.ngay),x.soDong,x.tongSL,x.by,x.kiemBy,x.note,x.status==="huy"?"Đã hủy: "+x.lyDoHuy:"Hiệu lực"]));
   const t2=[["Số phiếu","Ngày nhập","Nhóm","Vật tư","Đơn vị","Số lượng","Trạng thái"]];
   R.rows.forEach(x=>x.items.forEach(i=>t2.push([x.id,fmtD(x.ngay),i.group||"",i.name,i.unit||"",i.qty,x.status==="huy"?"Đã hủy":""])));
-  btn.disabled=true; btn.textContent="Đang tạo file…";
-  try{ const url=await api("exportReport","Phiếu nhập hàng "+fmtD(new Date(S.ui.pnFrom+"T00:00:00").getTime())+" - "+fmtD(new Date(S.ui.pnTo+"T00:00:00").getTime()), [{name:"Phiếu nhập",rows:t1},{name:"Chi tiết",rows:t2}]);
-    modal("Đã tạo file", '<p style="margin:0">File đã lưu vào Drive, thư mục <b>App Gokart → 02. Báo cáo</b>.</p><a class="btn pri big" href="'+esc(url)+'" target="_blank" rel="noopener">Mở file</a>');
-  }catch(e){ handleErr(e); }
-  btn.disabled=false; btn.textContent="Xuất danh sách ra Google Sheets";
+  return xuatNut(btn, "Xuất danh sách ra Excel", "Phiếu nhập hàng "+fmtD(new Date(S.ui.pnFrom+"T00:00:00").getTime())+" - "+fmtD(new Date(S.ui.pnTo+"T00:00:00").getTime()), [{name:"Phiếu nhập",rows:t1},{name:"Chi tiết",rows:t2}]);
 };
 
 /* settings */
+A.saoLuu = async (d,btn)=>{
+  btn.disabled=true; btn.textContent="Đang lấy dữ liệu…";
+  try{
+    const all=await api("saoLuuToanBo");
+    const tables=Object.keys(all).filter(k=>Array.isArray(all[k])).map(k=>{ const rs=all[k]; const cols=rs.length?Object.keys(rs[0]):["(trống)"]; return {name:k, rows:[cols].concat(rs.map(r=>cols.map(c=>{ const v=r[c]; return Array.isArray(v)? v.join(" | ") : (v===null||v===undefined?"":v); })))}; });
+    await xuatFile("Sao lưu Gokart "+fmtT(Date.now()).replace(/[/:]/g,"-"), tables); toast("Đã tải bản sao lưu về máy","ok");
+  }catch(e){ handleErr(e); }
+  btn.disabled=false; btn.textContent="Tải bản sao lưu (Excel)";
+};
+
+A.qrPrint = ()=>{
+  const url=location.origin+location.pathname; const ks=sortedKarts().filter(k=>k.active!==false);
+  const w=window.open("","_blank"); if(!w){ toast("Trình duyệt chặn cửa sổ mới. Cho phép bật cửa sổ rồi bấm lại.","bad",6000); return; }
+  const cells=ks.map(k=>'<div class="c"><div class="q" data-u="'+esc(url+"?xe="+k.id)+'"></div><b>'+esc(kartLabel(k))+'</b><span>Quét để báo hỏng / xem lịch sử</span></div>').join("");
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>QR xe Gokart</title><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></'+'script><style>body{font-family:Arial,sans-serif;margin:10mm}.g{display:grid;grid-template-columns:repeat(4,1fr);gap:6mm}.c{border:1px dashed #999;padding:4mm;text-align:center;break-inside:avoid}.q img,.q canvas{width:100%!important;height:auto!important}.c b{display:block;font-size:20pt;margin-top:2mm}.c span{font-size:8pt;color:#555}.n{margin-bottom:6mm}@media print{.n{display:none}}</style></head><body><div class="n">'+ks.length+' mã QR. Bấm Ctrl+P (máy Mac: Cmd+P) để in, dán mỗi mã lên đúng xe.</div><div class="g">'+cells+'</div><script>document.querySelectorAll(".q").forEach(function(e){new QRCode(e,{text:e.dataset.u,width:300,height:300,correctLevel:QRCode.CorrectLevel.M});});</'+'script></body></html>');
+  w.document.close();
+};
+
 A.dcAllT = ()=>{ S.ui.dcAll=$("#dcAll").checked; render(); };
 A.dcLoad = async ()=>{
   const f=val("dFrom")||S.ui.dcFrom, t=val("dTo")||S.ui.dcTo; S.ui.dcFrom=f; S.ui.dcTo=t;
@@ -1050,11 +1078,7 @@ A.dcExport = async (d,btn)=>{
     {name:"2. Đồ cũ thu về", rows:mk(["Thay cho xe","Gom về (đã xác nhận)","Báo bỏ","Chưa rõ"],T2)},
     {name:"3. Hàng hư chờ KT", rows:mk(["Đầu kỳ","Gom vào","Sửa được","Hỏng hẳn","Chênh lệch kiểm kê","Cuối kỳ"],T3)},
     {name:"4. Kho tổng", rows:mk(["Đầu kỳ","Nhập mua","Cấp xuống","Hủy","Theo sổ","Chênh lệch kiểm kê","Cuối kỳ"],T4)}];
-  btn.disabled=true; btn.textContent="Đang tạo file…";
-  try{ const url=await api("exportReport","Đối chiếu Gokart "+fmtD(R.from)+" - "+fmtD(R.to-1), tables);
-    modal("Đã tạo file đối chiếu", '<p style="margin:0">File đã lưu vào Drive, thư mục <b>App Gokart → 02. Báo cáo</b>.</p><a class="btn pri big" href="'+esc(url)+'" target="_blank" rel="noopener">Mở file</a>');
-  }catch(e){ handleErr(e); }
-  btn.disabled=false; btn.textContent="Xuất đối chiếu ra Google Sheets";
+  return xuatNut(btn, "Xuất đối chiếu ra Excel", "Đối chiếu Gokart "+fmtD(R.from)+" - "+fmtD(R.to-1), tables);
 };
 A.addKarts = ()=>{ modal("Thêm xe theo dải số", '<div class="f"><label for="fType">Loại xe</label><select id="fType"><option value="don">Xe đơn</option><option value="doi">Xe đôi</option></select></div><div class="f2"><div class="f"><label for="fFrom">Từ số</label><input id="fFrom" type="number" min="1" step="1" value="1"></div><div class="f"><label for="fTo">Đến số</label><input id="fTo" type="number" min="1" step="1" value="10"></div></div><div class="f"><label for="fExtra">Hoặc gõ danh sách số (cách nhau dấu phẩy)</label><input id="fExtra" type="text" placeholder="Ví dụ: 63, 64, 70"><span class="hint">Nếu điền ô này, app bỏ qua dải số ở trên.</span></div>', '<button class="btn pri" type="button" data-a="addKartsSave">Thêm xe</button>'); };
 A.addKartsSave = async (d,btn)=>{
@@ -1115,10 +1139,26 @@ A.impKiemKe = d=>{
   const dat=d.v==="dat";
   modal(dat?"Đặt số đầu kỳ":"Nạp kiểm kê định kỳ", (dat
     ? '<div class="small">Thay <b>toàn bộ</b> số tồn của cả kho tổng và kệ xưởng bằng số trong file. Ô trống tính là 0. <b>Không</b> ghi chênh lệch, chỉ dùng khi bắt đầu hoặc làm lại từ đầu.</div>'
-    : '<div class="small">So số trong file với sổ của app. Chỗ nào lệch, app ghi một dòng <b>Điều chỉnh</b> để hiện trong trang Đối chiếu. Ô để trống là không đếm, giữ nguyên.'+(S.isEditor?'':' Cột kho tổng sẽ được bỏ qua vì chỉ quản lý kiểm kê kho tổng.')+'</div>')+nameField("fBy","Người kiểm kê"),
+    : '<div class="small">So số trong file với sổ của app. Chỗ nào lệch, app ghi một dòng <b>Điều chỉnh</b> để hiện trong trang Đối chiếu. Ô để trống là không đếm, giữ nguyên.'+(S.isEditor?'':' Cột kho tổng sẽ được bỏ qua vì chỉ quản lý kiểm kê kho tổng.')+'</div>')+'<div class="f"><label for="fKK">File kiểm kê (Excel hoặc CSV)</label><input id="fKK" type="file" accept=".xlsx,.xls,.csv"><span class="hint">Dùng file mẫu tải từ app, hoặc file kiểm kê cũ tải về từ Google Sheet dạng Excel.</span></div>'+nameField("fBy","Người kiểm kê"),
     '<button class="btn pri" type="button" data-a="impKiemKeGo" data-v="'+(dat?"dat":"kiemke")+'">Nạp ngay</button>');
 };
-A.impKiemKeGo = async (d,btn)=>{ const by=readName(); if(!by) return; btn.disabled=true; btn.textContent="Đang nạp…"; const r=await save(()=>api("importKiemKe", d.v, by)); if(r){ closeModal(); modal("Đã nạp xong", '<p style="margin:0">'+esc(r)+'</p>'); } else { btn.disabled=false; btn.textContent="Nạp ngay"; } };
+A.impKiemKeGo = async (d,btn)=>{
+  const f=$("#fKK")&&$("#fKK").files[0]; if(!f){ toast("Chọn file kiểm kê.","bad"); return; }
+  const by=readName(); if(!by) return;
+  let table;
+  try{ const X=await loadXlsx(); const wb=X.read(await f.arrayBuffer(),{type:"array"}); table=X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:"",raw:true}); }
+  catch(e){ toast("Không đọc được file: "+((e&&e.message)||e),"bad",6000); return; }
+  btn.textContent="Đang nạp…";
+  const r=await save(()=>api("importKiemKe", d.v, by, table));
+  if(r){ closeModal(); modal("Đã nạp xong", '<p style="margin:0">'+esc(r)+'</p>'); } else btn.textContent="Nạp ngay";
+};
+A.kkMau = (d,btn)=>{
+  const st=stockMap();
+  const rows=[["Nhóm","Tên vật tư","Đơn vị","Ngưỡng kệ xưởng","Ngưỡng kho tổng","Tồn kho tổng","Kệ xưởng – hàng mới","Kệ xưởng – hàng đã sửa","Hư chờ kiểm tra","Sổ app: kho tổng","Sổ app: kệ mới","Sổ app: kệ đã sửa","Sổ app: hư chờ KT"]]
+    .concat(sortedParts().map(p=>{ const s=st[p.id]||{tong:0,moi:0,sua:0,cho:0}; return [p.group||"",p.name,p.unit||"",p.threshold||0,p.threshTong||0,"","","","",s.tong,s.moi,s.sua,s.cho]; }));
+  for(let i=0;i<30;i++) rows.push(["","","","","","","","","","","","",""]);
+  return xuatNut(btn, "Tải file mẫu kiểm kê", "Kiểm kê vật tư Gokart "+fmtD(Date.now()), [{name:"Kiểm kê", rows}]);
+};
 A.editChecklist = ()=>{
   modal("Sửa checklist",
     '<div class="f"><label for="fDaily">Mục kiểm tra đầu ngày (mỗi dòng một mục)</label><textarea id="fDaily" style="min-height:170px">'+esc(daily().join("\n"))+'</textarea></div>'
