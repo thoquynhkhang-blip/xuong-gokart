@@ -21,7 +21,7 @@ const SCHEMA = {
   PhieuNhap: { id: "s", ngay: "d", createdAt: "d", ncc: "s", soHD: "s", kiemBy: "s", by: "s", note: "s", soDong: "n", tongSL: "n", tongTien: "n",
     chiTiet: "s", anh: "a", status: "s", huyBy: "s", huyAt: "d", lyDoHuy: "s" }
 };
-const PHIEN_BAN = "cf-2026-11-19.3";
+const PHIEN_BAN = "cf-2026-11-19.4";
 const OPEN = ["cho", "dang", "doi"];
 const TYPES = { don: "Đơn", doi: "Đôi" };
 const q_ = c => '"' + c + '"';
@@ -215,7 +215,8 @@ const API = {
   },
 
   async updateTicket(ctx, pin, id, patch) {
-    await auth(ctx, pin);
+    const role = await auth(ctx, pin);
+    if (patch && patch.status === "huy" && role === "staff") throw err("Chỉ trưởng bộ phận hủy phiếu sửa.");
     const allowed = ["status", "startedAt", "doneAt", "fixer", "waitNote", "waitAt", "result", "cancelBy"];
     const p = {};
     allowed.forEach(k => { if (patch[k] !== undefined) p[k] = (k.slice(-2) === "At") ? Date.now() : str_(patch[k]); });
@@ -235,11 +236,11 @@ const API = {
     const role = await auth(ctx, pin);
     const ok = Number(k.ok) || 0, bad = Number(k.bad) || 0;
     if (ok < 0 || bad < 0 || ok + bad <= 0 || Math.floor(ok) !== ok || Math.floor(bad) !== bad) throw err("Số lượng không hợp lệ.");
-    if (role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý ghi kết quả kiểm tra hàng hư.");
+    if (role === "staff") throw err("Kết quả sửa đồ hư do trưởng bộ phận ghi.");
     const list = [];
     const tuGui = k.from === "gui";
-    if (ok) list.push({ kind: "nhap_sau_sua", loc: tuGui ? "gui" : "", partId: k.partId, qty: ok, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: sửa được" : "Thợ kiểm tra: sửa được") });
-    if (bad) list.push({ kind: "huy", loc: tuGui ? "gui" : "cho", partId: k.partId, qty: bad, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: hỏng hẳn" : "Thợ kiểm tra: không sửa được") });
+    if (ok) list.push({ kind: "nhap_sau_sua", loc: tuGui ? "gui" : "", partId: k.partId, qty: ok, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: sửa được" : "Kiểm tại xưởng: sửa được") });
+    if (bad) list.push({ kind: "huy", loc: tuGui ? "gui" : "cho", partId: k.partId, qty: bad, by: k.by, note: k.note || (tuGui ? "Thợ sửa trả về: hỏng hẳn" : "Kiểm tại xưởng: không sửa được") });
     return addMoves_(ctx, role, list);
   },
 
@@ -266,8 +267,8 @@ const API = {
     } else {
       const ok = fix && fix.ok !== undefined ? Number(fix.ok) : x.ok, bad = fix && fix.bad !== undefined ? Number(fix.bad) : x.bad;
       if (!(ok >= 0 && bad >= 0) || Math.floor(ok) !== ok || Math.floor(bad) !== bad) throw err("Số lượng không hợp lệ.");
-      if (ok > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "nhap_sau_sua", qty: ok, loc: "", note: (x.note || "Thợ kiểm tra: sửa được") + tag }));
-      if (bad > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now + 1, kind: "huy", qty: bad, loc: "cho", note: (x.note || "Thợ kiểm tra: không sửa được") + tag }));
+      if (ok > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now, kind: "nhap_sau_sua", qty: ok, loc: "", note: (x.note || "Kiểm tại xưởng: sửa được") + tag }));
+      if (bad > 0) rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now + 1, kind: "huy", qty: bad, loc: "cho", note: (x.note || "Kiểm tại xưởng: không sửa được") + tag }));
       patch = { status: "duyet", duyetBy: who, duyetAt: now, ok: ok, bad: bad };
     }
     // Đổi trạng thái trước, chỉ khi vẫn đang "chờ": hai người bấm cùng lúc thì chỉ một người được ghi kho
@@ -528,10 +529,10 @@ async function addMoves_(ctx, role, list) {
     if (kind === "cap" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý mới cấp hàng từ kho tổng.");
     if (kind === "dieu_chinh" && loc === "tong" && role !== "admin") throw err("Chỉ quản lý mới kiểm kê kho tổng.");
     if (kind === "dieu_chinh" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý mới kiểm kê.");
-    if (kind === "huy" && loc === "tong" && role === "staff") throw err("Nhân viên không hủy hàng kho tổng.");
+    if (kind === "huy" && role === "staff") throw err("Nhân viên bấm Báo vật tư hỏng, trưởng bộ phận quyết định hủy.");
     if (kind === "dieu_chinh" && !loc) throw err("Thiếu vị trí kiểm kê.");
     if (kind === "gui_sua" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý ghi gửi thợ sửa.");
-    if (role === "staff" && (kind === "nhap_sau_sua" || (kind === "huy" && (loc === "cho" || loc === "gui")))) throw err("Kết quả kiểm tra hàng hư phải gửi qua mục Thợ kiểm tra để trưởng bộ phận xác nhận.");
+    if (role === "staff" && (kind === "nhap_sau_sua" || (kind === "huy" && (loc === "cho" || loc === "gui")))) throw err("Kết quả sửa đồ hư do trưởng bộ phận ghi.");
     const qty = Number(m.qty);
     if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0)) throw err("Số lượng không hợp lệ.");
     const part = parts.find(p => p.id === m.partId);
