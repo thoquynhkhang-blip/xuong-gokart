@@ -662,7 +662,7 @@ function kartSelect(id, sel, allowNone){
 function partSelect(id, sel, filterFn, where){
   const st=stockMap(); let g=null, h='<select id="'+id+'"><option value="">Chọn phụ tùng…</option>';
   for(const p of sortedParts().filter(filterFn||(()=>true))){ if(p.group!==g){ if(g!==null) h+='</optgroup>'; g=p.group; h+='<optgroup label="'+esc(g||"Khác")+'">'; } const s=st[p.id]||{tong:0,moi:0,sua:0,cho:0,xuong:0};
-    const lab = where==="tong" ? 'kho tổng '+s.tong : where==="cho" ? 'hư chưa gửi thợ '+s.cho+(s.gui?' · ở chỗ thợ '+s.gui:'') : 'kệ xưởng '+s.xuong+(s.sua?' (đã sửa '+s.sua+')':'');
+    const lab = where==="tong" ? 'kho tổng '+s.tong : where==="cho" ? 'hư chưa gửi thợ '+s.cho+(s.gui?' · ở chỗ thợ '+s.gui:'') : (s.xuong>0 ? 'kệ xưởng '+s.xuong+(s.sua?' (đã sửa '+s.sua+')':'') : 'kệ hết'+(s.tong>0?' · kho tổng '+s.tong:''));
     h+='<option value="'+esc(p.id)+'" '+(p.id===sel?"selected":"")+'>'+esc(p.name)+' – '+lab+'</option>'; }
   return h+(g!==null?'</optgroup>':'')+'</select>';
 }
@@ -688,6 +688,8 @@ function locNhom(gsel, chon){
   if(el.value!==old) el.dispatchEvent(new Event("change",{bubbles:true}));
 }
 document.addEventListener("change",e=>{ const t=e.target; if(t&&t.matches&&t.matches("select[data-grp-for]")) locNhom(t,true); });
+function hienTu(){ const w=$("#fTuWrap"), p=$("#fPart"); if(!w||!p) return; const x=(stockMap()[p.value]||{}).xuong||0; w.style.display = (p.value && x<=0) ? "none" : ""; }
+document.addEventListener("change",e=>{ if(e.target&&e.target.id==="fPart") hienTu(); });
 function val(id){ const e=$("#"+id); return e? e.value.trim() : ""; }
 function num(id){ const n=Number(val(id)); return isFinite(n)?n:NaN; }
 
@@ -761,11 +763,9 @@ A.tCancelSave = d=>{ const by=readName(); if(!by) return; if(!val("fRes")){ toas
 A.useParts = d=>{
   if(!guardWrite()) return;
   const tk = d.ticket? allTickets().get(d.ticket) : null; const st=stockMap();
-  const coKe=p=>((st[p.id]||{}).xuong||0)>0;
-  if(!sortedParts().some(coKe)){ toast("Kệ xưởng chưa có phụ tùng nào. Báo trưởng bộ phận cấp xuống.","bad",5000); return; }
   modal("Thay phụ tùng cho xe",
     (tk?'<div class="small muted">Phiếu: '+esc(kartLabel(kartById(tk.kartId)))+' · '+esc(tk.issue||"")+'</div>':'<div class="f"><label for="fKart">Xe được thay</label>'+kartSelect("fKart", d.kart||"", true)+'</div>')
-   +partPicker("fPart", "Phụ tùng lấy từ kệ xưởng", "", coKe, "xuong")
+   +partPicker("fPart", "Phụ tùng thay vào xe", "", null, "xuong")
    +'<div class="f"><label for="fQty">Số lượng</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
    +'<div class="f"><span class="lb">Đồ cũ tháo ra</span><div class="opts"><label class="opt"><input type="radio" name="fOld" value="gom" checked> Nộp lại cho trưởng bộ phận (không chắc thì chọn mục này)</label><label class="opt"><input type="radio" name="fOld" value="bo"> Bỏ hẳn (cháy, bể nát) – ghi lý do</label></div></div>'
    +'<div class="f"><label for="fNote">Ghi chú / lý do bỏ</label><input id="fNote" type="text" placeholder="Bắt buộc nếu bỏ đồ cũ"></div>'
@@ -777,11 +777,14 @@ A.useSave = async d=>{
   const partId=val("fPart"), qty=num("fQty"); if(!partId){ toast("Chọn phụ tùng.","bad"); return; } if(!(qty>0)||!Number.isInteger(qty)){ toast("Số lượng phải là số nguyên lớn hơn 0.","bad"); return; }
   const kartId=d.kart||val("fKart")||""; const ticketId=d.ticket||""; const note=val("fNote"); const old=(document.querySelector('input[name=fOld]:checked')||{}).value||"gom";
   if(old==="bo"&&!note){ toast("Ghi lý do bỏ đồ cũ.","bad"); return; }
-  const s=stockMap()[partId]||{moi:0,sua:0};
-  if(qty>(s.moi||0)+(s.sua||0)){ toast("Kệ xưởng chỉ còn "+((s.moi||0)+(s.sua||0))+" cái. Báo trưởng bộ phận cấp thêm.","bad",5000); return; }
+  const s=stockMap()[partId]||{tong:0,moi:0,sua:0};
+  const ke=Math.max(0,s.moi||0)+Math.max(0,s.sua||0), thieu=qty-ke;
+  if(thieu>0 && !S.isTruong){ toast("Kệ xưởng "+(ke?"chỉ còn "+ke+" cái":"hết món này")+(s.tong>0?", kho tổng còn "+s.tong:"")+". Báo trưởng bộ phận cấp xuống rồi ghi lại.","bad",6000); return; }
+  if(thieu>0 && thieu>(s.tong||0)){ toast("Kệ xưởng còn "+ke+", kho tổng còn "+(s.tong||0)+" – không đủ "+qty+" cái.","bad",6000); return; }
   const by=readName(); if(!by) return;
   const tuSua=Math.min(qty, Math.max(0,s.sua||0)), tuMoi=qty-tuSua;   // hàng đã sửa dùng trước
   const list=[];
+  if(thieu>0) list.push({kind:"cap", partId, qty:thieu, by, note:"Lấy thẳng từ kho tổng khi thay cho xe"});   // trưởng BP: kệ thiếu thì cấp luôn
   if(tuSua) list.push({kind:"xuat", partId, qty:tuSua, kartId, ticketId, by, note, src:"sua", old});
   if(tuMoi) list.push({kind:"xuat", partId, qty:tuMoi, kartId, ticketId, by, note, src:"moi", old});
   if(old==="gom") list.push({kind:"gom_sua", partId, qty, kartId, ticketId, by, note:"Đồ cũ tháo từ "+kartLabel(kartById(kartId))});
@@ -835,25 +838,25 @@ A.mvSave = async d=>{
 /* ---------- báo vật tư hỏng (không gắn với xe) ---------- */
 A.hong = d=>{
   if(!guardWrite()) return;
-  const st=stockMap(); const coKe=p=>((st[p.id]||{}).xuong||0)>0 || p.id===d.part;
-  if(!sortedParts().some(coKe)){ toast("Kệ xưởng chưa có vật tư nào.","bad"); return; }
   modal("Báo vật tư hỏng",
-    partPicker("fPart", "Vật tư hỏng", d.part||"", coKe, "xuong")
+    partPicker("fPart", "Vật tư hỏng", d.part||"", null, "xuong")
+   +'<div class="f" id="fTuWrap"><span class="lb">Đồ hỏng lấy từ đâu?</span><div class="opts"><label class="opt"><input type="radio" name="fTu" value="ke" checked> Trên kệ xưởng (trừ kệ)</label><label class="opt"><input type="radio" name="fTu" value="dung"> Đang dùng ngoài bãi / trạm sạc (không trừ kệ)</label></div></div>'
    +'<div class="f"><label for="fQty">Số lượng hỏng</label><input id="fQty" type="number" inputmode="numeric" min="1" step="1" value="1"></div>'
    +'<div class="f"><label for="fNote">Hỏng thế nào?</label><input id="fNote" type="text" placeholder="Ví dụ: pin không giữ điện, sạc không lên đèn"></div>'
    +nameField("fBy","Người báo")
    +'<div class="small muted">'+(S.isTruong?'Kệ xưởng trừ ngay, đồ hỏng chuyển sang hàng hư chưa gửi thợ.':'Trưởng bộ phận nhận đồ hỏng và xác nhận thì kệ xưởng mới trừ.')+' Đồ cũ tháo ra khi thay cho xe thì ghi ở phần Thay phụ tùng.</div>',
-    '<button class="btn pri" type="button" data-a="hongSave">Gửi báo hỏng</button>');
+    '<button class="btn pri" type="button" data-a="hongSave">Gửi báo hỏng</button>'); hienTu();
 };
 A.hongSave = async ()=>{
   const partId=val("fPart"), qty=num("fQty"), note=val("fNote");
   if(!partId){ toast("Chọn vật tư hỏng.","bad"); return; }
   if(!Number.isInteger(qty)||qty<=0){ toast("Nhập số lượng hỏng.","bad"); return; }
   const s=stockMap()[partId]||{xuong:0};
-  if(qty>(s.xuong||0)){ toast("Kệ xưởng chỉ còn "+(s.xuong||0)+" cái.","bad",5000); return; }
+  const tu=(s.xuong||0)>0 ? ((document.querySelector('input[name=fTu]:checked')||{}).value||"ke") : "dung";
+  if(tu==="ke" && qty>(s.xuong||0)){ toast("Kệ xưởng chỉ còn "+(s.xuong||0)+" cái. Nếu đồ hỏng đang dùng ngoài bãi thì chọn mục đó.","bad",6000); return; }
   if(!note){ toast("Ghi ngắn gọn hỏng thế nào.","bad"); return; }
   const by=readName(); if(!by) return;
-  const r=await save(()=>api("addMoves",[{kind:"gom_sua", src:"ke", partId, qty, by, note}]));
+  const r=await save(()=>api("addMoves",[{kind:"gom_sua", src:tu==="ke"?"ke":"", partId, qty, by, note}]));
   if(r){ closeModal(); toast(r.pending? "Đã gửi báo hỏng, chờ trưởng bộ phận xác nhận." : "Đã ghi: "+qty+" "+partLabel(S.parts.get(partId))+" hỏng, chờ gửi thợ sửa.","ok",5000); }
 };
 /* trưởng BP: lập phiếu gửi thợ (nhiều vật tư một lần) và nhận đồ thợ trả về */
