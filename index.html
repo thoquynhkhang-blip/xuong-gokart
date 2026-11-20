@@ -512,7 +512,7 @@ function vStock(){
   h+='<section class="sec"><div class="sec-h"><h2>'+(loc==="tong"?"Kho tổng":"Kệ xưởng")+'</h2><span class="sub">'+ps.length+' mã · '+low+(loc==="tong"?' cần mua':' cần cấp xuống')+'</span></div>';
   if(S.isTruong) h+='<div class="seg" role="tablist"><button type="button" class="'+(loc==="xuong"?"on":"")+'" data-a="sloc" data-v="xuong">Kệ xưởng</button><button type="button" class="'+(loc==="tong"?"on":"")+'" data-a="sloc" data-v="tong">Kho tổng</button></div>';
   if(loc==="xuong"){
-    h+='<div class="quick"><button class="btn pri" type="button" data-a="useParts">Thay phụ tùng cho xe</button><button class="btn" type="button" data-a="hong">Báo vật tư hỏng</button><a class="btn" href="#vat-tu-hong">Vật tư hỏng</a>'
+    h+='<div class="quick"><a class="btn" href="#vat-tu-hong">Vật tư hỏng</a>'
       +(S.isTruong?'<button class="btn" type="button" data-a="mv" data-k="cap">Cấp từ kho tổng xuống</button><button class="btn" type="button" data-a="gui">Lập phiếu gửi thợ</button><button class="btn" type="button" data-a="nhan">Nhận đồ thợ trả về</button><button class="btn" type="button" data-a="mv" data-k="dieu_chinh" data-loc="xuong">Kiểm kê kệ xưởng</button><button class="btn" type="button" data-a="mv" data-k="huy">Hủy hàng</button>':'')+'</div>';
   } else {
     const need=sortedParts().filter(p=>partState(p,st,"tong"));
