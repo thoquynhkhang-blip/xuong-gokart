@@ -627,6 +627,8 @@ function vSettings(){
   h+='<div class="card stack"><b>4. Chốt sổ kho</b><span class="small muted">Đang có <b>'+nMoves+'</b> giao dịch kho kể từ lần chốt trước ('+(lastC?fmtT(lastC):"chưa chốt")+'). Nên chốt mỗi tháng để app tải nhanh; lịch sử cũ vẫn được giữ nguyên và tra được ở Lịch sử.</span><div class="inline"><button class="btn" type="button" data-a="closeBook">Chốt sổ ngay</button></div></div>';
   h+='<div class="card stack"><b>5. Đăng nhập & phân quyền</b><span class="small muted">3 mã PIN: <b>nhân viên</b> (thay đồ, gom hàng hư, gửi kết quả kiểm tra), <b>trưởng bộ phận</b> (thêm: cấp hàng từ kho tổng, kiểm kê kệ xưởng, xác nhận hàng hư), <b>quản lý</b> (toàn quyền, nhập mua, kiểm kê kho tổng, đối chiếu). Muốn đổi mã PIN: nhắn Claude đổi giúp.</span></div>';
   h+='<div class="card stack"><b>6. Sao lưu</b><span class="small muted">Dữ liệu nằm trên máy chủ Cloudflare, có thể khôi phục về bất kỳ thời điểm nào trong 7 ngày qua. Nên tải thêm một bản Excel về máy mỗi tuần.</span><div class="inline"><button class="btn" type="button" data-a="saoLuu">Tải bản sao lưu (Excel)</button></div></div>';
+  h+='<div class="card stack"><b>7. Đổi mã PIN</b><span class="small muted">Mỗi mã gồm 6 chữ số, 3 mã phải khác nhau. Đổi xong, người dùng mã cũ sẽ phải nhập mã mới.</span>'
+    +[["staffPin","Nhân viên"],["truongPin","Trưởng bộ phận"],["adminPin","Quản lý (mã của anh)"]].map(([k,l])=>'<div class="inline"><label style="min-width:130px" for="pin_'+k+'">'+l+'</label><input id="pin_'+k+'" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="Mã mới" style="max-width:120px"><button class="btn sm" type="button" data-a="doiPin" data-k="'+k+'">Đổi</button></div>').join("")+'</div>';
   return h+'</section>';
 }
 function vQR(){
@@ -1214,6 +1216,13 @@ A.pnExport = async (d,btn)=>{
 };
 
 /* settings */
+A.doiPin = async d=>{
+  const el=$("#pin_"+d.k); const moi=(el&&el.value||"").trim();
+  if(!/^[0-9]{6}$/.test(moi)){ toast("Mã PIN phải gồm đúng 6 chữ số.","bad"); return; }
+  if(!confirm("Đổi mã PIN này? Ai đang dùng mã cũ sẽ phải nhập mã mới.")) return;
+  const r=await save(()=>api("doiPin", d.k, moi));
+  if(r){ el.value=""; if(d.k==="adminPin"){ S.pin=moi; try{ lsSet("gk_pin",moi); }catch(e){} } toast("Đã đổi mã PIN. Nhớ báo mã mới cho người dùng.","ok",6000); }
+};
 A.saoLuu = async (d,btn)=>{
   btn.disabled=true; btn.textContent="Đang lấy dữ liệu…";
   try{
