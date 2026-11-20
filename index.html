@@ -259,7 +259,9 @@ function handleErr(e){
 function api(fn, ...args){
   return new Promise((res,rej)=>{
     if(!IS_GAS){
-      fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({fn,args:[S.pin,...args],op:OP_ID+":"+fn}),redirect:"follow"})
+      const ctl=(typeof AbortController!=="undefined")? new AbortController() : null; const hen=setTimeout(()=>{ if(ctl) ctl.abort(); rej(new Error("Máy chủ trả lời quá lâu. Kiểm tra mạng rồi bấm lại (không sợ ghi trùng).")); }, 20000);
+      fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({fn,args:[S.pin,...args],op:OP_ID+":"+fn}),redirect:"follow",signal:ctl?ctl.signal:undefined})
+        .finally(()=>clearTimeout(hen))
         .then(r=>{ if(!r.ok) throw new Error("Máy chủ lỗi "+r.status+". Thử lại."); return r.json(); })
         .then(j=>{ if(j&&j.ok) res(j.data===null?undefined:j.data); else rej(new Error((j&&j.error)||"Lỗi không rõ.")); })
         .catch(e=>rej(/Failed to fetch|NetworkError|Load failed/i.test(String(e&&e.message))? new Error("Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.") : e));
@@ -722,12 +724,15 @@ function guardWrite(){ if(S.readOnly){ toast("Bạn đang ở chế độ chỉ 
 A.newTicket = d=>{
   if(!guardWrite()) return;
   modal("Báo hỏng xe",
-    '<div class="f"><label for="fKart">Xe</label>'+kartSelect("fKart", d.kart||"")+'</div>'
+    '<div class="f"><label for="fKart">Xe</label>'+kartSelect("fKart", d.kart||"")+'</div><div id="fKartWarn"></div>'
    +'<div class="f"><label for="fCat">Bộ phận hỏng</label><select id="fCat">'+ISSUE_CATS.map(c=>'<option>'+esc(c)+'</option>').join("")+'</select></div>'
    +'<div class="f"><label for="fIssue">Mô tả lỗi</label><textarea id="fIssue" placeholder="Ví dụ: bánh sau kêu lộc cộc, bơm không vô hơi"></textarea></div>'
    +'<div class="f"><span class="lb">Xe còn chạy được không?</span><div class="opts"><label class="opt"><input type="radio" name="fBlock" value="1" checked> Ngưng chạy, đưa vào xưởng</label><label class="opt"><input type="radio" name="fBlock" value="0"> Lỗi nhẹ, vẫn cho khách chạy</label></div></div>'
    +nameField("fBy","Người báo"),
     '<button class="btn pri" type="button" data-a="ticketSave">Gửi báo hỏng</button>');
+  const ve=()=>{ const id=val("fKart"), box=$("#fKartWarn"); if(!box) return; const mo=openTickets().filter(t=>t.kartId===id);
+    box.innerHTML= mo.length? '<div class="banner small">Xe này đang có '+mo.length+' phiếu sửa chưa xong: '+mo.map(t=>esc(t.issue||"")).join("; ")+'. Chỉ gửi tiếp nếu là lỗi khác.</div>' : ""; };
+  ve(); const sel=$("#fKart"); if(sel) sel.addEventListener("change",ve);
 };
 A.ticketSave = async ()=>{
   const kartId=val("fKart"), issue=val("fIssue"); if(!kartId){ toast("Chọn xe bị hỏng.","bad"); return; } if(!issue){ toast("Mô tả lỗi ngắn gọn.","bad"); return; }

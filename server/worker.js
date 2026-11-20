@@ -21,7 +21,7 @@ const SCHEMA = {
   PhieuNhap: { id: "s", ngay: "d", createdAt: "d", ncc: "s", soHD: "s", kiemBy: "s", by: "s", note: "s", soDong: "n", tongSL: "n", tongTien: "n",
     chiTiet: "s", anh: "a", status: "s", huyBy: "s", huyAt: "d", lyDoHuy: "s" }
 };
-const PHIEN_BAN = "cf-2026-11-19.4";
+const PHIEN_BAN = "cf-2026-11-20.1";
 const OPEN = ["cho", "dang", "doi"];
 const TYPES = { don: "Đơn", doi: "Đôi" };
 const q_ = c => '"' + c + '"';
@@ -209,7 +209,10 @@ const API = {
     const S = await snap(ctx.db);
     const o = { id: "P" + uid_(), kartId: str_(t.kartId, 40), kartLabel: kartLabel_(t.kartId, S.karts), cat: str_(t.cat, 60), issue: str_(t.issue),
       blocking: t.blocking !== false, reporter: name_(t.reporter), status: "cho", createdAt: Date.now() };
-    if (!o.kartId || !o.issue) throw err("Thiếu xe hoặc mô tả lỗi.");
+    if (!o.kartId || !o.issue.trim()) throw err("Thiếu xe hoặc mô tả lỗi.");
+    const xe = S.karts.find(k => k.id === o.kartId);
+    if (!xe) throw err("Không tìm thấy xe này.");
+    if (!xe.active) throw err("Xe này đang ngưng dùng.");
     ctx.db.insert("PhieuSua", [o]); await ctx.db.commit();
     return o.id;
   },
@@ -221,6 +224,9 @@ const API = {
     const p = {};
     allowed.forEach(k => { if (patch[k] !== undefined) p[k] = (k.slice(-2) === "At") ? Date.now() : str_(patch[k]); });
     if (p.status && !["cho", "dang", "doi", "xong", "huy"].includes(p.status)) throw err("Trạng thái không hợp lệ.");
+    const cur = await ctx.db.first("SELECT status FROM PhieuSua WHERE id=?", String(id));
+    if (!cur) throw err("Không tìm thấy phiếu sửa.");
+    if (!OPEN.includes(cur.status)) throw err("Phiếu này đã đóng, không sửa được nữa.");
     ctx.db.update("PhieuSua", String(id), p);
     const r = await ctx.db.commit();
     if (r.length && r[0].meta.changes === 0) throw err("Không tìm thấy phiếu sửa.");
@@ -258,7 +264,7 @@ const API = {
     let patch;
     if (x.type === "gom") {
       const q = fix && fix.qty !== undefined ? Number(fix.qty) : x.qty;
-      if (!(q >= 0) || Math.floor(q) !== q) throw err("Số lượng không hợp lệ.");
+      if (!(q >= 0) || Math.floor(q) !== q || q > x.qty) throw err("Số lượng không hợp lệ (tối đa " + x.qty + ").");
       if (q > 0 && keChung) {
         const S = await snap(ctx.db); const ton = balances_(S.parts, S.moves, Infinity)[x.partId] || {};
         tachKe_(q, ton, x.partName).forEach((t, i) => rows.push(Object.assign({}, base, { id: "G" + uid_(), at: now + i, kind: "gom_sua", qty: t.q, loc: "", src: t.src, note: (x.note || "Báo hỏng") + tag })));
@@ -397,7 +403,8 @@ const API = {
   async importKiemKe(ctx, pin, mode, by, table) {
     const role = await auth(ctx, pin, "truong");
     if (mode === "dat" && role !== "admin") throw err("Chỉ quản lý mới đặt số đầu kỳ.");
-    return napKiemKe_(ctx, mode === "dat" ? "dat" : "kiemke", name_(by), role === "admin", docBangKiemKe_(table));
+    const list = docBangKiemKe_(table), who = name_(by);
+    return khoaKho_(ctx.db, () => napKiemKe_(ctx, mode === "dat" ? "dat" : "kiemke", who, role === "admin", list));
   },
 
   async doiChieu(ctx, pin, from, to) {
@@ -480,6 +487,8 @@ const API = {
     const p = (await ctx.db.rows("PhieuNhap", "id=?", String(id)))[0];
     if (!p) throw err("Không tìm thấy phiếu " + id + ".");
     if (p.status === "huy") throw err("Phiếu này đã hủy trước đó.");
+    const S0 = await snap(ctx.db); const st0 = balances_(S0.parts, S0.moves, Infinity);
+    phieu_(p).items.forEach(it => { const t = (st0[it.partId] || {}).tong || 0; if (t < it.qty) throw err(it.name + ": kho tổng chỉ còn " + t + " (đã cấp xuống bớt), không hủy phiếu được. Hãy kiểm kê điều chỉnh thay vì hủy phiếu."); });
     const now = Date.now();
     ctx.db.update("PhieuNhap", p.id, { status: "huy", huyBy: who, huyAt: now, lyDoHuy: why }, " AND status<>'huy'");
     const r = await ctx.db.commit();
@@ -502,6 +511,10 @@ const API = {
   }
 };
 
+for (const k of ["approvePending", "huyPhieuNhap", "closeBook", "taoPhieuNhap"]) {
+  const goc = API[k];
+  API[k] = function (ctx, ...a) { return khoaKho_(ctx.db, () => goc.call(API, ctx, ...a)); };
+}
 function phieu_(p) { const o = Object.assign({}, p); try { o.items = JSON.parse(o.chiTiet || "[]"); } catch (e) { o.items = []; } delete o.chiTiet; return o; }
 
 const KINDS = ["nhap", "cap", "xuat", "gom_sua", "nhap_sau_sua", "huy", "dieu_chinh", "gui_sua"];
@@ -514,7 +527,24 @@ function tachKe_(q, ton, name) {
   if (q - a > 0) out.push({ src: "moi", q: q - a });
   return out;
 }
-async function addMoves_(ctx, role, list) {
+/* khóa kho: mỗi lúc chỉ 1 lệnh ghi kho chạy, tránh 2 máy cùng trừ một số hàng */
+async function khoaKho_(db, fn) {
+  const key = "LOCK:kho"; let got = false;
+  for (let i = 0; i < 60 && !got; i++) {
+    const now = Date.now();
+    const r = await db.d.prepare("INSERT OR IGNORE INTO Ops(op,s,t) VALUES (?,'lock',?)").bind(key, now).run();
+    if (r.meta.changes === 1) { got = true; break; }
+    const cur = await db.first("SELECT t FROM Ops WHERE op=?", key);
+    if (cur && now - cur.t > 15000) await db.d.prepare("DELETE FROM Ops WHERE op=? AND t=?").bind(key, cur.t).run();
+    await new Promise(res => setTimeout(res, 120));
+  }
+  if (!got) throw err("Hệ thống đang bận, thử lại sau ít giây.");
+  try { return await fn(); }
+  finally { await db.d.prepare("DELETE FROM Ops WHERE op=?").bind(key).run(); }
+}
+const TEN_O = { tong: "kho tổng", moi: "kệ xưởng (hàng mới)", sua: "kệ xưởng (hàng đã sửa)", cho: "đồ hư chưa gửi thợ", gui: "đồ ở chỗ thợ" };
+function addMoves_(ctx, role, list) { return khoaKho_(ctx.db, () => ghiKho_(ctx, role, list)); }
+async function ghiKho_(ctx, role, list) {
   const S = await snap(ctx.db);
   const karts = S.karts, parts = S.parts;
   const now = Date.now();
@@ -534,11 +564,18 @@ async function addMoves_(ctx, role, list) {
     if (kind === "gui_sua" && role === "staff") throw err("Chỉ trưởng bộ phận hoặc quản lý ghi gửi thợ sửa.");
     if (role === "staff" && (kind === "nhap_sau_sua" || (kind === "huy" && (loc === "cho" || loc === "gui")))) throw err("Kết quả sửa đồ hư do trưởng bộ phận ghi.");
     const qty = Number(m.qty);
-    if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0)) throw err("Số lượng không hợp lệ.");
+    if (!isFinite(qty) || Math.floor(qty) !== qty || (kind !== "dieu_chinh" && qty <= 0) || Math.abs(qty) > 100000) throw err("Số lượng không hợp lệ.");
+    if (kind === "huy" && !str_(m.note).trim()) throw err("Ghi lý do hủy.");
     const part = parts.find(p => p.id === m.partId);
     if (!part) throw err("Phụ tùng không tồn tại.");
     const ton = (bal || (bal = balances_(parts, S.moves, Infinity)))[part.id] || {};
     if (kind === "gui_sua" && qty > (ton.cho || 0)) throw err(part.name + ": chỉ còn " + (ton.cho || 0) + " cái hư chưa gửi thợ.");
+    const can = (o, q) => { if (q > (ton[o] || 0)) throw err(part.name + ": " + TEN_O[o] + " chỉ còn " + Math.max(0, ton[o] || 0) + ", không ghi " + q + " được."); };
+    if (kind === "cap") can("tong", qty);
+    if (kind === "xuat") can(m.src === "sua" ? "sua" : "moi", qty);
+    if (kind === "huy") can(loc, qty);
+    if (kind === "nhap_sau_sua" && loc !== "gui") can("cho", qty);
+    if (kind === "dieu_chinh" && (ton[loc] || 0) + qty < 0) throw err(part.name + ": số đếm không thể âm.");
     if ((kind === "nhap_sau_sua" || kind === "huy") && loc === "gui" && qty > (ton.gui || 0)) throw err(part.name + ": thợ đang giữ " + (ton.gui || 0) + " cái, không ghi " + qty + " được.");
     const tho = kind === "gui_sua" ? str_(m.tho, 60).trim() : "";
     if (kind === "gui_sua" && !tho) throw err("Ghi tên thợ hoặc nơi nhận sửa.");
@@ -556,10 +593,11 @@ async function addMoves_(ctx, role, list) {
     if (kind === "gom_sua" && r.src === "ke") {
       const parts2 = tachKe_(qty, ton, part.name);
       if (role === "staff") { rows.push(r); return; }
-      parts2.forEach(t => rows.push(Object.assign({}, r, { id: "G" + uid_(), at: now + rows.length, qty: t.q, src: t.src })));
+      parts2.forEach(t => { const x = Object.assign({}, r, { id: "G" + uid_(), at: now + rows.length, qty: t.q, src: t.src }); rows.push(x); applyMove_(ton, x); });
       return;
     }
     rows.push(r);
+    if (!(kind === "gom_sua" && role === "staff")) applyMove_(ton, r);
   });
   const pend = [], direct = [];
   rows.forEach(r => { if (r.kind === "gom_sua" && role === "staff") pend.push(r); else direct.push(r); });
