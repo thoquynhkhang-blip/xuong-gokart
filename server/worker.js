@@ -373,6 +373,17 @@ const API = {
     ctx.db.insert("PhuTung", add); await ctx.db.commit();
     return { added: add.length, updated: upd };
   },
+  async doiPin(ctx, pin, loai, moi) {
+    await auth(ctx, pin, true);
+    const ten = { staffPin: "nhân viên", truongPin: "trưởng bộ phận", adminPin: "quản lý" };
+    if (!ten[loai]) throw err("Loại mã PIN không hợp lệ.");
+    moi = String(moi || "").trim();
+    if (!/^[0-9]{6}$/.test(moi)) throw err("Mã PIN phải gồm đúng 6 chữ số.");
+    const S = await snap(ctx.db);
+    for (const k in ten) if (k !== loai && String(S.cfg[k]) === moi) throw err("Mã này đang trùng với PIN " + ten[k] + ". Chọn mã khác.");
+    ctx.db.setConfig({ [loai]: moi }); await ctx.db.commit();
+    return true;
+  },
   async saveConfig(ctx, pin, patch) {
     await auth(ctx, pin, true);
     const p = {};
@@ -675,7 +686,7 @@ async function napKiemKe_(ctx, mode, by, allowTong, list) {
 
 /* ---------------- chống lệnh trùng (bấm đúp, mạng gửi lại) ---------------- */
 const GHI = ["addTicket", "updateTicket", "addMoves", "submitKtra", "approvePending", "rejectPending", "addCheck", "addMaint", "addKarts",
-  "updateKart", "deleteKart", "savePart", "hidePart", "importParts", "saveConfig", "closeBook", "importKiemKe", "taoPhieuNhap", "huyPhieuNhap"];
+  "updateKart", "deleteKart", "savePart", "hidePart", "importParts", "saveConfig", "doiPin", "closeBook", "importKiemKe", "taoPhieuNhap", "huyPhieuNhap"];
 async function opBatDau(db, op) {
   for (let i = 0; i < 40; i++) {
     const r = await db.d.prepare("INSERT OR IGNORE INTO Ops(op,s,t) VALUES (?,'run',?)").bind(op, Date.now()).run();
